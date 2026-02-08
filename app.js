@@ -1,88 +1,7 @@
-const catalog = [
-  {
-    id: "monstera",
-    name: "Монстера",
-    light: "Яркий рассеянный",
-    water: "1-2 раза в неделю",
-    fussiness: "Средняя",
-    image:
-      "https://images.unsplash.com/photo-1501004318641-b39e6451bec6?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: "sansevieria",
-    name: "Сансевиерия",
-    light: "От тени до яркого",
-    water: "Раз в 2-3 недели",
-    fussiness: "Низкая",
-    image:
-      "https://images.unsplash.com/photo-1485955900006-10f4d324d411?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: "spathiphyllum",
-    name: "Спатифиллум",
-    light: "Полутень",
-    water: "Регулярно, не пересушивать",
-    fussiness: "Средняя",
-    image:
-      "https://images.unsplash.com/photo-1446071103084-c257b5f70672?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: "zamioculcas",
-    name: "Замиокулькас",
-    light: "Полутень",
-    water: "Раз в 2-3 недели",
-    fussiness: "Низкая",
-    image:
-      "https://images.unsplash.com/photo-1465101046530-73398c7f28ca?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: "calathea",
-    name: "Калатея",
-    light: "Яркий рассеянный",
-    water: "Часто, мягкая вода",
-    fussiness: "Высокая",
-    image:
-      "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: "ficus",
-    name: "Фикус Бенджамина",
-    light: "Яркий рассеянный",
-    water: "1 раз в неделю",
-    fussiness: "Средняя",
-    image:
-      "https://images.unsplash.com/photo-1471879832106-c7ab9e0cee23?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: "chlorophytum",
-    name: "Хлорофитум",
-    light: "Полутень",
-    water: "1 раз в неделю",
-    fussiness: "Низкая",
-    image:
-      "https://images.unsplash.com/photo-1495195134817-aeb325a55b65?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: "violet",
-    name: "Фиалка (сенполия)",
-    light: "Яркий рассеянный",
-    water: "Умеренно, теплой водой",
-    fussiness: "Средняя",
-    image:
-      "https://images.unsplash.com/photo-1477554193778-9562c28588c3?auto=format&fit=crop&w=800&q=60",
-  },
-];
-
 const EVENT_TYPES = {
   watered: { label: "Полив", badgeClass: "watered" },
   repotted: { label: "Пересадка", badgeClass: "repotted" },
   fertilized: { label: "Подкормка", badgeClass: "fertilized" },
-};
-
-const STORAGE_KEYS = {
-  profile: "plants.profile",
-  collection: "plants.collection",
-  events: "plants.events",
 };
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -90,6 +9,61 @@ const monthFormatter = new Intl.DateTimeFormat("ru-RU", {
   month: "long",
   year: "numeric",
 });
+
+const api = {
+  async request(path, options = {}) {
+    const response = await fetch(path, {
+      headers: {
+        Accept: "application/json",
+        ...options.headers,
+      },
+      ...options,
+    });
+    if (!response.ok) {
+      let message = `Ошибка ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData && errorData.error) {
+          message = errorData.error;
+        }
+      } catch (error) {
+        try {
+          const text = await response.text();
+          if (text) {
+            message = text;
+          }
+        } catch (innerError) {
+          message = message;
+        }
+      }
+      throw new Error(message);
+    }
+    if (response.status === 204) {
+      return null;
+    }
+    return response.json();
+  },
+  get(path) {
+    return api.request(path);
+  },
+  post(path, body) {
+    return api.request(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+  put(path, body) {
+    return api.request(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  },
+  delete(path) {
+    return api.request(path, { method: "DELETE" });
+  },
+};
 
 document.addEventListener("DOMContentLoaded", () => {
   const dom = {
@@ -121,22 +95,16 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const submitButton = dom.eventForm.querySelector("button[type='submit']");
-  const plantIndex = new Map(catalog.map((plant) => [plant.id, plant]));
+  let plantIndex = new Map();
+  let profileSaveTimer = null;
   const state = {
-    profile: loadProfile(),
-    collection: loadCollection(plantIndex),
-    events: loadEvents(),
+    profile: { name: "" },
+    collection: [],
+    events: [],
     monthCursor: new Date(),
     catalogQuery: "",
+    catalog: [],
   };
-
-  if (dom.profileName) {
-    dom.profileName.value = state.profile.name;
-  }
-
-  if (!dom.eventDate.value) {
-    dom.eventDate.value = toISODate(new Date());
-  }
 
   dom.tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -151,7 +119,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   dom.profileName.addEventListener("input", (event) => {
     state.profile.name = event.target.value;
-    saveProfile(state.profile);
+    scheduleProfileSave();
   });
 
   dom.catalogGrid.addEventListener("click", (event) => {
@@ -200,33 +168,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!dom.eventPlant.value) {
       return;
     }
-    const type = dom.eventType.value;
-    const date = dom.eventDate.value || toISODate(new Date());
-    const fertilizer = dom.eventFertilizer.value.trim();
-    if (type === "fertilized" && !fertilizer) {
-      dom.eventFertilizer.focus();
-      return;
-    }
-    const newEvent = {
-      id: createId(),
-      plantId: dom.eventPlant.value,
-      type,
-      date,
-      fertilizer: type === "fertilized" ? fertilizer : "",
-      notes: dom.eventNotes.value.trim(),
-      createdAt: new Date().toISOString(),
-    };
-    state.events.unshift(newEvent);
-    saveEvents(state.events);
-    const [year, month] = date.split("-").map(Number);
-    if (Number.isFinite(year) && Number.isFinite(month)) {
-      state.monthCursor = new Date(year, month - 1, 1);
-    }
-    dom.eventNotes.value = "";
-    dom.eventFertilizer.value = "";
-    renderCalendar();
-    renderEventList();
-    updateStats();
+    createEvent();
   });
 
   dom.eventList.addEventListener("click", (event) => {
@@ -234,12 +176,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!button) {
       return;
     }
-    const eventId = button.dataset.id;
-    state.events = state.events.filter((item) => item.id !== eventId);
-    saveEvents(state.events);
-    renderCalendar();
-    renderEventList();
-    updateStats();
+    deleteEvent(button.dataset.id);
   });
 
   dom.calendarGrid.addEventListener("click", (event) => {
@@ -251,14 +188,52 @@ document.addEventListener("DOMContentLoaded", () => {
     renderCalendar();
   });
 
-  renderCatalog();
-  renderCollection();
-  renderPlantOptions();
-  updateEventFormState();
-  updateFertilizerField();
-  updateStats();
-  renderCalendar();
-  renderEventList();
+  init();
+
+  async function init() {
+    try {
+      const [catalogData, profileData, collectionData, eventsData] =
+        await Promise.all([
+          api.get("/api/catalog"),
+          api.get("/api/profile"),
+          api.get("/api/collection"),
+          api.get("/api/events"),
+        ]);
+      state.catalog = Array.isArray(catalogData?.catalog)
+        ? catalogData.catalog
+        : Array.isArray(catalogData)
+        ? catalogData
+        : [];
+      state.profile =
+        profileData && typeof profileData.name === "string"
+          ? profileData
+          : { name: "" };
+      state.collection = Array.isArray(collectionData?.collection)
+        ? collectionData.collection
+        : [];
+      state.events = Array.isArray(eventsData?.events) ? eventsData.events : [];
+      plantIndex = new Map(state.catalog.map((plant) => [plant.id, plant]));
+    } catch (error) {
+      showError("Не удалось загрузить данные с сервера.", error);
+    }
+
+    if (dom.profileName) {
+      dom.profileName.value = state.profile.name;
+    }
+
+    if (!dom.eventDate.value) {
+      dom.eventDate.value = toISODate(new Date());
+    }
+
+    renderCatalog();
+    renderCollection();
+    renderPlantOptions();
+    updateEventFormState();
+    updateFertilizerField();
+    updateStats();
+    renderCalendar();
+    renderEventList();
+  }
 
   function setActiveView(viewId) {
     dom.views.forEach((view) => {
@@ -271,7 +246,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderCatalog() {
     const query = state.catalogQuery.trim().toLowerCase();
-    const filtered = catalog.filter((plant) =>
+    const filtered = state.catalog.filter((plant) =>
       plant.name.toLowerCase().includes(query)
     );
     dom.catalogGrid.innerHTML = "";
@@ -474,6 +449,23 @@ document.addEventListener("DOMContentLoaded", () => {
     updateFertilizerField();
   }
 
+  function scheduleProfileSave() {
+    if (profileSaveTimer) {
+      clearTimeout(profileSaveTimer);
+    }
+    profileSaveTimer = setTimeout(async () => {
+      try {
+        const updated = await api.put("/api/profile", {
+          name: state.profile.name,
+        });
+        state.profile =
+          updated && typeof updated.name === "string" ? updated : state.profile;
+      } catch (error) {
+        showError("Не удалось сохранить профиль.", error);
+      }
+    }, 400);
+  }
+
   function updateFertilizerField() {
     const isFertilized = dom.eventType.value === "fertilized";
     dom.fertilizerField.classList.toggle("is-hidden", !isFertilized);
@@ -482,25 +474,39 @@ document.addEventListener("DOMContentLoaded", () => {
       dom.eventPlant.disabled || !isFertilized;
   }
 
-  function addPlantToCollection(id) {
+  async function addPlantToCollection(id) {
     if (!id || state.collection.includes(id)) {
       return;
     }
-    state.collection.push(id);
-    saveCollection(state.collection);
-    renderCatalog();
-    renderCollection();
-    updateEventFormState();
-    updateStats();
+    try {
+      const response = await api.post("/api/collection", { plantId: id });
+      if (Array.isArray(response?.collection)) {
+        state.collection = response.collection;
+      }
+      renderCatalog();
+      renderCollection();
+      updateEventFormState();
+      updateStats();
+    } catch (error) {
+      showError("Не удалось добавить растение в коллекцию.", error);
+    }
   }
 
-  function removePlantFromCollection(id) {
-    state.collection = state.collection.filter((item) => item !== id);
-    saveCollection(state.collection);
-    renderCatalog();
-    renderCollection();
-    updateEventFormState();
-    updateStats();
+  async function removePlantFromCollection(id) {
+    try {
+      const response = await api.delete(`/api/collection/${id}`);
+      if (Array.isArray(response?.collection)) {
+        state.collection = response.collection;
+      } else {
+        state.collection = state.collection.filter((item) => item !== id);
+      }
+      renderCatalog();
+      renderCollection();
+      updateEventFormState();
+      updateStats();
+    } catch (error) {
+      showError("Не удалось удалить растение из коллекции.", error);
+    }
   }
 
   function changeMonth(delta) {
@@ -511,6 +517,55 @@ document.addEventListener("DOMContentLoaded", () => {
     );
     renderCalendar();
     renderEventList();
+  }
+
+  async function createEvent() {
+    const type = dom.eventType.value;
+    const date = dom.eventDate.value || toISODate(new Date());
+    const fertilizer = dom.eventFertilizer.value.trim();
+    if (type === "fertilized" && !fertilizer) {
+      dom.eventFertilizer.focus();
+      return;
+    }
+    const payload = {
+      plantId: dom.eventPlant.value,
+      type,
+      date,
+      fertilizer: type === "fertilized" ? fertilizer : "",
+      notes: dom.eventNotes.value.trim(),
+    };
+    try {
+      const created = await api.post("/api/events", payload);
+      if (created) {
+        state.events.unshift(created);
+      }
+      const [year, month] = date.split("-").map(Number);
+      if (Number.isFinite(year) && Number.isFinite(month)) {
+        state.monthCursor = new Date(year, month - 1, 1);
+      }
+      dom.eventNotes.value = "";
+      dom.eventFertilizer.value = "";
+      renderCalendar();
+      renderEventList();
+      updateStats();
+    } catch (error) {
+      showError("Не удалось сохранить событие.", error);
+    }
+  }
+
+  async function deleteEvent(eventId) {
+    if (!eventId) {
+      return;
+    }
+    try {
+      await api.delete(`/api/events/${eventId}`);
+      state.events = state.events.filter((item) => item.id !== eventId);
+      renderCalendar();
+      renderEventList();
+      updateStats();
+    } catch (error) {
+      showError("Не удалось удалить событие.", error);
+    }
   }
 });
 
@@ -592,72 +647,6 @@ function createActionButton(label, style, action, id) {
   return button;
 }
 
-function parseJSON(value, fallback) {
-  if (!value) {
-    return fallback;
-  }
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    return fallback;
-  }
-}
-
-function loadProfile() {
-  const stored = parseJSON(localStorage.getItem(STORAGE_KEYS.profile), {});
-  return {
-    name: typeof stored.name === "string" ? stored.name : "",
-  };
-}
-
-function loadCollection(plantIndex) {
-  const stored = parseJSON(localStorage.getItem(STORAGE_KEYS.collection), []);
-  if (!Array.isArray(stored)) {
-    return [];
-  }
-  return stored.filter((id) => typeof id === "string" && plantIndex.has(id));
-}
-
-function loadEvents() {
-  const stored = parseJSON(localStorage.getItem(STORAGE_KEYS.events), []);
-  if (!Array.isArray(stored)) {
-    return [];
-  }
-  return stored
-    .filter((event) => event && typeof event === "object")
-    .map((event) => ({
-      id: typeof event.id === "string" ? event.id : createId(),
-      plantId: typeof event.plantId === "string" ? event.plantId : "",
-      type: EVENT_TYPES[event.type] ? event.type : "watered",
-      date: isValidISODate(event.date) ? event.date : toISODate(new Date()),
-      fertilizer: typeof event.fertilizer === "string" ? event.fertilizer : "",
-      notes: typeof event.notes === "string" ? event.notes : "",
-      createdAt:
-        typeof event.createdAt === "string"
-          ? event.createdAt
-          : new Date().toISOString(),
-    }));
-}
-
-function saveProfile(profile) {
-  localStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(profile));
-}
-
-function saveCollection(collection) {
-  localStorage.setItem(STORAGE_KEYS.collection, JSON.stringify(collection));
-}
-
-function saveEvents(events) {
-  localStorage.setItem(STORAGE_KEYS.events, JSON.stringify(events));
-}
-
-function createId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `event-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 function pad2(value) {
   return `${value}`.padStart(2, "0");
 }
@@ -715,4 +704,9 @@ function countEventTypes(events) {
 
 function toggleEmpty(element, show) {
   element.style.display = show ? "block" : "none";
+}
+
+function showError(message, error) {
+  console.error(message, error);
+  window.alert(message);
 }
