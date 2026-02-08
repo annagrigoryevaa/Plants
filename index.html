@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Домашние растения</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo" aria-hidden="true">🌿</div>
+          <div>
+            <h1>Домашние растения</h1>
+            <p>Справочник, личная коллекция и календарь ухода.</p>
+          </div>
+        </div>
+        <nav class="tabs" role="tablist">
+          <button class="tab is-active" data-view="catalog" type="button">Каталог</button>
+          <button class="tab" data-view="collection" type="button">Моя коллекция</button>
+          <button class="tab" data-view="calendar" type="button">Календарь ухода</button>
+        </nav>
+      </header>
+
+      <main>
+        <section id="catalog" class="view is-active">
+          <div class="section-head">
+            <div>
+              <h2>Справочник домашних растений</h2>
+              <p>Коллекция растений с фото и краткой информацией об уходе.</p>
+            </div>
+            <div class="search">
+              <label class="sr-only" for="catalogSearch">Поиск по названию</label>
+              <input id="catalogSearch" type="search" placeholder="Поиск по названию" />
+            </div>
+          </div>
+          <div class="catalog-grid" id="catalogGrid"></div>
+          <div class="empty" id="catalogEmpty">
+            Ничего не найдено. Попробуйте другое название.
+          </div>
+        </section>
+
+        <section id="collection" class="view">
+          <div class="section-head">
+            <div>
+              <h2>Личный профиль</h2>
+              <p>Соберите свою коллекцию и следите за уходом за растениями.</p>
+            </div>
+          </div>
+
+          <div class="profile-grid">
+            <div class="profile-card">
+              <label for="profileName">Ваше имя</label>
+              <input id="profileName" type="text" placeholder="Например, Анна" />
+              <div class="stats">
+                <div>
+                  <span class="stat-label">Растений в коллекции</span>
+                  <span class="stat-value" id="statPlants">0</span>
+                </div>
+                <div>
+                  <span class="stat-label">Событий ухода</span>
+                  <span class="stat-value" id="statEvents">0</span>
+                </div>
+              </div>
+              <p class="hint">Данные сохраняются в браузере на этом устройстве.</p>
+            </div>
+
+            <div class="collection-panel">
+              <h3>Моя коллекция</h3>
+              <div class="collection-grid" id="collectionGrid"></div>
+              <div class="empty" id="collectionEmpty">
+                Пока пусто. Добавьте растения из справочника.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="calendar" class="view">
+          <div class="section-head">
+            <div>
+              <h2>Календарь ухода</h2>
+              <p>
+                Отмечайте полив, пересадку и подкормку с указанием удобрения.
+              </p>
+            </div>
+          </div>
+
+          <div class="calendar-layout">
+            <div class="calendar-board">
+              <div class="calendar-header">
+                <button class="btn ghost" id="prevMonth" type="button" aria-label="Предыдущий месяц">
+                  ←
+                </button>
+                <div class="calendar-month" id="calendarMonth"></div>
+                <button class="btn ghost" id="nextMonth" type="button" aria-label="Следующий месяц">
+                  →
+                </button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Пн</span>
+                <span>Вт</span>
+                <span>Ср</span>
+                <span>Чт</span>
+                <span>Пт</span>
+                <span>Сб</span>
+                <span>Вс</span>
+              </div>
+              <div class="calendar-grid" id="calendarGrid"></div>
+              <div class="calendar-legend">
+                <div><span class="legend-dot watered"></span>Полив</div>
+                <div><span class="legend-dot repotted"></span>Пересадка</div>
+                <div><span class="legend-dot fertilized"></span>Подкормка</div>
+              </div>
+            </div>
+
+            <div class="calendar-side">
+              <form id="eventForm" class="event-form">
+                <h3>Новое событие</h3>
+                <label for="eventPlant">Растение</label>
+                <select id="eventPlant"></select>
+                <label for="eventType">Тип ухода</label>
+                <select id="eventType">
+                  <option value="watered">Полив</option>
+                  <option value="repotted">Пересадка</option>
+                  <option value="fertilized">Подкормка</option>
+                </select>
+                <label for="eventDate">Дата</label>
+                <input id="eventDate" type="date" />
+
+                <div id="fertilizerField" class="fertilizer-field is-hidden">
+                  <label for="eventFertilizer">Удобрение</label>
+                  <input
+                    id="eventFertilizer"
+                    type="text"
+                    placeholder="Например, комплексное универсальное"
+                  />
+                </div>
+
+                <label for="eventNotes">Заметка (необязательно)</label>
+                <textarea
+                  id="eventNotes"
+                  rows="3"
+                  placeholder="Например, увеличили объем воды"
+                ></textarea>
+
+                <button class="btn primary" type="submit">Сохранить событие</button>
+                <p class="hint" id="calendarHint">
+                  Добавьте растения в коллекцию, чтобы отмечать уход.
+                </p>
+              </form>
+
+              <div class="event-list">
+                <div class="event-list-head">
+                  <h3>События за месяц</h3>
+                  <span class="event-count" id="eventCount"></span>
+                </div>
+                <div id="eventList"></div>
+                <div class="empty" id="eventEmpty">
+                  Пока нет записей за выбранный месяц.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        Сделано для удобного ухода за домашними растениями.
+      </footer>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
