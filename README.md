@@ -8,9 +8,22 @@
 
 ## Как запустить
 
-Требуется Go (1.22+). Запустите сервер:
+Требуется Go (1.24+), PostgreSQL 16+. Удобнее всего поднять БД через Docker:
 
 ```bash
+docker compose up -d
+```
+
+Запуск сервера:
+
+```bash
+export DB_HOST=localhost
+export DB_PORT=5432
+export DB_USER=plants
+export DB_PASSWORD=plants
+export DB_NAME=plants
+export DB_SSLMODE=disable
+
 go run ./cmd/server
 ```
 
@@ -20,7 +33,18 @@ go run ./cmd/server
 http://localhost:8080
 ```
 
-Данные сохраняются в `data/store.json`. Переменные окружения:
+### Доступ к базе данных
+
+Подключиться можно напрямую:
+
+```bash
+psql "postgres://plants:plants@localhost:5432/plants?sslmode=disable"
+```
+
+Схема описана в `db/schema.sql`, можно использовать ее для ручного редактирования.
+
+### Переменные окружения
 
 - `PORT` — порт сервера (по умолчанию 8080).
-- `STORE_PATH` — путь к файлу хранения данных.
+- `DATABASE_URL` — полная строка подключения к PostgreSQL.
+- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE` — параметры подключения.

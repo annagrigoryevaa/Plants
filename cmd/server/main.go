@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -9,11 +11,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type Plant struct {
@@ -39,16 +42,8 @@ type Event struct {
 	CreatedAt  string `json:"createdAt"`
 }
 
-type Store struct {
-	Profile    Profile  `json:"profile"`
-	Collection []string `json:"collection"`
-	Events     []Event  `json:"events"`
-}
-
 type App struct {
-	mu         sync.RWMutex
-	store      Store
-	storePath  string
+	db         *sql.DB
 	catalog    []Plant
 	plantIndex map[string]Plant
 }
@@ -58,19 +53,24 @@ const (
 	isoDateLayout    = "2006-01-02"
 	isoMonthLayout   = "2006-01"
 	maxBodySizeBytes = 1 << 20
+	dbTimeout        = 4 * time.Second
 )
 
-var allowedEventTypes = map[string]bool{
-	"watered":    true,
-	"repotted":   true,
-	"fertilized": true,
-}
+var (
+	allowedEventTypes = map[string]bool{
+		"watered":    true,
+		"repotted":   true,
+		"fertilized": true,
+	}
+	errNotFound = errors.New("not found")
+)
 
 func main() {
 	app, err := newApp()
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer app.db.Close()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/catalog", app.handleCatalog)
@@ -110,16 +110,19 @@ func newApp() (*App, error) {
 		plantIndex[plant.ID] = plant
 	}
 
-	storePath := getenv("STORE_PATH", filepath.Join("data", "store.json"))
-	store, err := loadStore(storePath)
+	db, err := openDB()
 	if err != nil {
 		return nil, err
 	}
-	store.Collection = filterCollection(store.Collection, plantIndex)
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+	if err := ensureSchema(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
 
 	return &App{
-		store:      store,
-		storePath:  storePath,
+		db:         db,
 		catalog:    catalog,
 		plantIndex: plantIndex,
 	}, nil
@@ -136,9 +139,13 @@ func (a *App) handleCatalog(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleProfile(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		a.mu.RLock()
-		profile := a.store.Profile
-		a.mu.RUnlock()
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		profile, err := a.getProfile(ctx)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeJSON(w, http.StatusOK, profile)
 	case http.MethodPut:
 		var input Profile
@@ -146,15 +153,13 @@ func (a *App) handleProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		a.mu.Lock()
-		a.store.Profile = Profile{Name: strings.TrimSpace(input.Name)}
-		if err := a.saveStoreLocked(); err != nil {
-			a.mu.Unlock()
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		profile, err := a.updateProfile(ctx, strings.TrimSpace(input.Name))
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		profile := a.store.Profile
-		a.mu.Unlock()
 		writeJSON(w, http.StatusOK, profile)
 	default:
 		methodNotAllowed(w, r.Method, http.MethodGet, http.MethodPut)
@@ -168,9 +173,13 @@ func (a *App) handleCollection(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		a.mu.RLock()
-		collection := append([]string(nil), a.store.Collection...)
-		a.mu.RUnlock()
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		collection, err := a.listCollection(ctx)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string][]string{"collection": collection})
 	case http.MethodPost:
 		var input struct {
@@ -189,17 +198,13 @@ func (a *App) handleCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "неизвестное растение")
 			return
 		}
-		a.mu.Lock()
-		if !containsString(a.store.Collection, plantID) {
-			a.store.Collection = append(a.store.Collection, plantID)
-		}
-		if err := a.saveStoreLocked(); err != nil {
-			a.mu.Unlock()
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		collection, err := a.addToCollection(ctx, plantID)
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		collection := append([]string(nil), a.store.Collection...)
-		a.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string][]string{"collection": collection})
 	default:
 		methodNotAllowed(w, r.Method, http.MethodGet, http.MethodPost)
@@ -221,21 +226,17 @@ func (a *App) handleCollectionItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "plantId обязателен")
 		return
 	}
-
-	a.mu.Lock()
-	if !containsString(a.store.Collection, plantID) {
-		a.mu.Unlock()
-		writeError(w, http.StatusNotFound, "растение не найдено в коллекции")
-		return
-	}
-	a.store.Collection = removeString(a.store.Collection, plantID)
-	if err := a.saveStoreLocked(); err != nil {
-		a.mu.Unlock()
+	ctx, cancel := a.requestContext(r)
+	defer cancel()
+	collection, err := a.removeFromCollection(ctx, plantID)
+	if err != nil {
+		if errors.Is(err, errNotFound) {
+			writeError(w, http.StatusNotFound, "растение не найдено в коллекции")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	collection := append([]string(nil), a.store.Collection...)
-	a.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string][]string{"collection": collection})
 }
 
@@ -247,15 +248,21 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		month := strings.TrimSpace(r.URL.Query().Get("month"))
-		a.mu.RLock()
-		events := append([]Event(nil), a.store.Events...)
-		a.mu.RUnlock()
+		var monthStart, monthEnd time.Time
+		var err error
 		if month != "" {
-			if _, err := time.Parse(isoMonthLayout, month); err != nil {
+			monthStart, monthEnd, err = monthRange(month)
+			if err != nil {
 				writeError(w, http.StatusBadRequest, "неверный формат месяца")
 				return
 			}
-			events = filterEventsByMonth(events, month)
+		}
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		events, err := a.listEvents(ctx, monthStart, monthEnd)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 		writeJSON(w, http.StatusOK, map[string][]Event{"events": events})
 	case http.MethodPost:
@@ -293,7 +300,8 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "date обязателен")
 			return
 		}
-		if _, err := time.Parse(isoDateLayout, input.Date); err != nil {
+		eventDate, err := time.Parse(isoDateLayout, input.Date)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "неверный формат даты")
 			return
 		}
@@ -302,28 +310,22 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		a.mu.Lock()
-		if !containsString(a.store.Collection, input.PlantID) {
-			a.mu.Unlock()
-			writeError(w, http.StatusBadRequest, "растение не в коллекции")
-			return
-		}
-		event := Event{
-			ID:         newID(),
-			PlantID:    input.PlantID,
-			Type:       input.Type,
-			Date:       input.Date,
-			Fertilizer: input.Fertilizer,
-			Notes:      input.Notes,
-			CreatedAt:  time.Now().UTC().Format(time.RFC3339),
-		}
-		a.store.Events = append([]Event{event}, a.store.Events...)
-		if err := a.saveStoreLocked(); err != nil {
-			a.mu.Unlock()
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		inCollection, err := a.isInCollection(ctx, input.PlantID)
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		a.mu.Unlock()
+		if !inCollection {
+			writeError(w, http.StatusBadRequest, "растение не в коллекции")
+			return
+		}
+		event, err := a.createEvent(ctx, input.PlantID, input.Type, eventDate, input.Fertilizer, input.Notes)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeJSON(w, http.StatusCreated, event)
 	default:
 		methodNotAllowed(w, r.Method, http.MethodGet, http.MethodPost)
@@ -345,31 +347,263 @@ func (a *App) handleEventItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "id обязателен")
 		return
 	}
-	a.mu.Lock()
-	index := -1
-	for i, event := range a.store.Events {
-		if event.ID == eventID {
-			index = i
-			break
+	ctx, cancel := a.requestContext(r)
+	defer cancel()
+	if err := a.deleteEvent(ctx, eventID); err != nil {
+		if errors.Is(err, errNotFound) {
+			writeError(w, http.StatusNotFound, "событие не найдено")
+			return
 		}
-	}
-	if index == -1 {
-		a.mu.Unlock()
-		writeError(w, http.StatusNotFound, "событие не найдено")
-		return
-	}
-	a.store.Events = append(a.store.Events[:index], a.store.Events[index+1:]...)
-	if err := a.saveStoreLocked(); err != nil {
-		a.mu.Unlock()
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *App) saveStoreLocked() error {
-	return saveStore(a.storePath, a.store)
+func (a *App) requestContext(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(r.Context(), dbTimeout)
+}
+
+func (a *App) getProfile(ctx context.Context) (Profile, error) {
+	var name string
+	err := a.db.QueryRowContext(ctx, "SELECT name FROM profiles WHERE id = 1").Scan(&name)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Profile{Name: ""}, nil
+		}
+		return Profile{}, err
+	}
+	return Profile{Name: name}, nil
+}
+
+func (a *App) updateProfile(ctx context.Context, name string) (Profile, error) {
+	var updated string
+	err := a.db.QueryRowContext(
+		ctx,
+		"INSERT INTO profiles (id, name) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name RETURNING name",
+		name,
+	).Scan(&updated)
+	if err != nil {
+		return Profile{}, err
+	}
+	return Profile{Name: updated}, nil
+}
+
+func (a *App) listCollection(ctx context.Context) ([]string, error) {
+	rows, err := a.db.QueryContext(ctx, "SELECT plant_id FROM collection ORDER BY created_at ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	collection := make([]string, 0)
+	for rows.Next() {
+		var plantID string
+		if err := rows.Scan(&plantID); err != nil {
+			return nil, err
+		}
+		if _, ok := a.plantIndex[plantID]; ok {
+			collection = append(collection, plantID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return collection, nil
+}
+
+func (a *App) addToCollection(ctx context.Context, plantID string) ([]string, error) {
+	if _, err := a.db.ExecContext(ctx, "INSERT INTO collection (plant_id) VALUES ($1) ON CONFLICT DO NOTHING", plantID); err != nil {
+		return nil, err
+	}
+	return a.listCollection(ctx)
+}
+
+func (a *App) removeFromCollection(ctx context.Context, plantID string) ([]string, error) {
+	result, err := a.db.ExecContext(ctx, "DELETE FROM collection WHERE plant_id = $1", plantID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		return nil, errNotFound
+	}
+	return a.listCollection(ctx)
+}
+
+func (a *App) isInCollection(ctx context.Context, plantID string) (bool, error) {
+	var exists bool
+	err := a.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM collection WHERE plant_id = $1)", plantID).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (a *App) listEvents(ctx context.Context, monthStart, monthEnd time.Time) ([]Event, error) {
+	query := "SELECT id, plant_id, event_type, event_date, fertilizer, notes, created_at FROM events"
+	args := []interface{}{}
+	if !monthStart.IsZero() && !monthEnd.IsZero() {
+		query += " WHERE event_date >= $1 AND event_date < $2"
+		args = append(args, monthStart, monthEnd)
+	}
+	query += " ORDER BY created_at DESC"
+
+	rows, err := a.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make([]Event, 0)
+	for rows.Next() {
+		var event Event
+		var eventType string
+		var eventDate time.Time
+		var createdAt time.Time
+		if err := rows.Scan(&event.ID, &event.PlantID, &eventType, &eventDate, &event.Fertilizer, &event.Notes, &createdAt); err != nil {
+			return nil, err
+		}
+		event.Type = eventType
+		event.Date = eventDate.Format(isoDateLayout)
+		event.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+func (a *App) createEvent(ctx context.Context, plantID, eventType string, eventDate time.Time, fertilizer, notes string) (Event, error) {
+	event := Event{
+		ID:         newID(),
+		PlantID:    plantID,
+		Type:       eventType,
+		Date:       eventDate.Format(isoDateLayout),
+		Fertilizer: fertilizer,
+		Notes:      notes,
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	createdAt, err := time.Parse(time.RFC3339, event.CreatedAt)
+	if err != nil {
+		createdAt = time.Now().UTC()
+		event.CreatedAt = createdAt.Format(time.RFC3339)
+	}
+	_, err = a.db.ExecContext(
+		ctx,
+		"INSERT INTO events (id, plant_id, event_type, event_date, fertilizer, notes, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+		event.ID,
+		event.PlantID,
+		event.Type,
+		eventDate,
+		event.Fertilizer,
+		event.Notes,
+		createdAt,
+	)
+	if err != nil {
+		return Event{}, err
+	}
+	return event, nil
+}
+
+func (a *App) deleteEvent(ctx context.Context, eventID string) error {
+	result, err := a.db.ExecContext(ctx, "DELETE FROM events WHERE id = $1", eventID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return errNotFound
+	}
+	return nil
+}
+
+func openDB() (*sql.DB, error) {
+	dsn := getDatabaseURL()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(4)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func getDatabaseURL() string {
+	if value := strings.TrimSpace(os.Getenv("DATABASE_URL")); value != "" {
+		return value
+	}
+	host := getenv("DB_HOST", "localhost")
+	port := getenv("DB_PORT", "5432")
+	user := getenv("DB_USER", "plants")
+	password := getenv("DB_PASSWORD", "plants")
+	name := getenv("DB_NAME", "plants")
+	sslmode := getenv("DB_SSLMODE", "disable")
+
+	u := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(user, password),
+		Host:   fmt.Sprintf("%s:%s", host, port),
+		Path:   name,
+	}
+	query := u.Query()
+	query.Set("sslmode", sslmode)
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
+func ensureSchema(ctx context.Context, db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS profiles (
+			id SMALLINT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS collection (
+			plant_id TEXT PRIMARY KEY,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS events (
+			id TEXT PRIMARY KEY,
+			plant_id TEXT NOT NULL,
+			event_type TEXT NOT NULL CHECK (event_type IN ('watered', 'repotted', 'fertilized')),
+			event_date DATE NOT NULL,
+			fertilizer TEXT NOT NULL DEFAULT '',
+			notes TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			CHECK ((event_type != 'fertilized') OR (length(trim(fertilizer)) > 0))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_date ON events (event_date)`,
+		`INSERT INTO profiles (id, name) VALUES (1, '') ON CONFLICT (id) DO NOTHING`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func monthRange(month string) (time.Time, time.Time, error) {
+	start, err := time.Parse(isoMonthLayout, month)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	end := start.AddDate(0, 1, 0)
+	return start, end, nil
 }
 
 func defaultCatalog() []Plant {
@@ -439,104 +673,6 @@ func defaultCatalog() []Plant {
 			Image:     "https://images.unsplash.com/photo-1477554193778-9562c28588c3?auto=format&fit=crop&w=800&q=60",
 		},
 	}
-}
-
-func loadStore(path string) (Store, error) {
-	var store Store
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return Store{
-				Profile:    Profile{},
-				Collection: []string{},
-				Events:     []Event{},
-			}, nil
-		}
-		return store, err
-	}
-	if err := json.Unmarshal(data, &store); err != nil {
-		return Store{
-			Profile:    Profile{},
-			Collection: []string{},
-			Events:     []Event{},
-		}, nil
-	}
-	if store.Collection == nil {
-		store.Collection = []string{}
-	}
-	if store.Events == nil {
-		store.Events = []Event{}
-	}
-	return store, nil
-}
-
-func saveStore(path string, store Store) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	tempFile, err := os.CreateTemp(dir, "store-*.json")
-	if err != nil {
-		return err
-	}
-	if _, err := tempFile.Write(data); err != nil {
-		tempFile.Close()
-		return err
-	}
-	if err := tempFile.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tempFile.Name(), path)
-}
-
-func filterCollection(collection []string, plantIndex map[string]Plant) []string {
-	seen := make(map[string]bool, len(collection))
-	result := make([]string, 0, len(collection))
-	for _, id := range collection {
-		id = strings.TrimSpace(id)
-		if id == "" || seen[id] {
-			continue
-		}
-		if _, ok := plantIndex[id]; !ok {
-			continue
-		}
-		seen[id] = true
-		result = append(result, id)
-	}
-	return result
-}
-
-func filterEventsByMonth(events []Event, month string) []Event {
-	filtered := make([]Event, 0, len(events))
-	for _, event := range events {
-		if strings.HasPrefix(event.Date, month) {
-			filtered = append(filtered, event)
-		}
-	}
-	return filtered
-}
-
-func containsString(items []string, value string) bool {
-	for _, item := range items {
-		if item == value {
-			return true
-		}
-	}
-	return false
-}
-
-func removeString(items []string, value string) []string {
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		if item != value {
-			result = append(result, item)
-		}
-	}
-	return result
 }
 
 func newID() string {
