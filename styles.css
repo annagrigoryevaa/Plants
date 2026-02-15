@@ -1,18 +1,17 @@
 :root {
-  --bg: #f8f1f6;
+  --bg: #f6f7f9;
   --surface: #ffffff;
-  --surface-alt: #fff7fb;
-  --text: #2b1f2c;
-  --muted: #7a6b7c;
-  --primary: #d86b9c;
-  --primary-dark: #b45282;
-  --border: #f1dbe8;
-  --shadow: 0 20px 50px rgba(88, 45, 80, 0.16);
-  --shadow-soft: 0 10px 30px rgba(88, 45, 80, 0.12);
-  --water: #6cb5f4;
-  --repot: #f3a483;
-  --fert: #b592ff;
-  --accent: #ffe3f0;
+  --surface-alt: #f9fafb;
+  --text: #1f2933;
+  --muted: #6b7280;
+  --primary: #2f6fed;
+  --primary-dark: #2357c6;
+  --border: #e5e7eb;
+  --shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  --shadow-soft: 0 6px 18px rgba(15, 23, 42, 0.06);
+  --water: #3b82f6;
+  --repot: #f59e0b;
+  --fert: #8b5cf6;
 }
 
 * {
@@ -21,8 +20,8 @@
 
 body {
   margin: 0;
-  font-family: "Quicksand", "Segoe UI", system-ui, -apple-system, sans-serif;
-  background: radial-gradient(circle at top, #ffffff 0%, var(--bg) 45%, #f6e9f1 100%);
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
   color: var(--text);
 }
 
@@ -32,7 +31,7 @@ img {
 }
 
 .app {
-  max-width: 1280px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 28px;
 }
@@ -43,10 +42,10 @@ img {
   justify-content: space-between;
   gap: 16px;
   align-items: center;
-  margin-bottom: 32px;
-  padding: 18px 20px;
-  border-radius: 24px;
-  background: linear-gradient(135deg, #fff5fa 0%, #ffffff 55%, #fff0f7 100%);
+  margin-bottom: 28px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: var(--surface);
   box-shadow: var(--shadow-soft);
   border: 1px solid var(--border);
 }
@@ -58,34 +57,33 @@ img {
 }
 
 .logo {
-  width: 52px;
-  height: 52px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #d86b9c, #f7b0cc);
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: var(--primary);
   display: grid;
   place-items: center;
-  font-size: 24px;
+  font-size: 22px;
   color: #fff;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-soft);
 }
 
 h1 {
   margin: 0 0 6px;
-  font-size: 30px;
-  font-family: "Playfair Display", "Times New Roman", serif;
-  letter-spacing: 0.3px;
+  font-size: 28px;
+  font-weight: 700;
 }
 
 h2 {
   margin: 0 0 6px;
-  font-size: 24px;
-  font-family: "Playfair Display", "Times New Roman", serif;
+  font-size: 22px;
+  font-weight: 700;
 }
 
 h3 {
   margin: 0 0 12px;
-  font-size: 19px;
-  font-family: "Playfair Display", "Times New Roman", serif;
+  font-size: 18px;
+  font-weight: 600;
 }
 
 p {
@@ -100,21 +98,20 @@ p {
 }
 
 .tab {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  padding: 9px 18px;
-  border-radius: 999px;
-  font-weight: 700;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 600;
   color: var(--muted);
   cursor: pointer;
   transition: 0.2s ease;
-  box-shadow: 0 6px 16px rgba(88, 45, 80, 0.08);
 }
 
 .tab.is-active {
-  background: linear-gradient(135deg, var(--primary), #f2a2c4);
-  color: #fff;
-  border-color: transparent;
+  color: var(--text);
+  background: var(--surface-alt);
+  border-color: var(--border);
 }
 
 .view {
@@ -141,12 +138,11 @@ p {
 }
 
 .search input {
-  padding: 10px 16px;
-  border-radius: 14px;
+  padding: 9px 14px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface);
-  min-width: 240px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+  min-width: 220px;
 }
 
 .catalog-grid,
@@ -165,19 +161,13 @@ p {
 
 .plant-card {
   background: var(--surface);
-  border-radius: 22px;
+  border-radius: 16px;
   border: 1px solid var(--border);
   overflow: hidden;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.plant-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 24px 60px rgba(88, 45, 80, 0.2);
 }
 
 .plant-card.is-compact {
@@ -186,7 +176,7 @@ p {
 }
 
 .plant-photo {
-  height: 180px;
+  height: 176px;
   object-fit: cover;
   width: 100%;
 }
@@ -221,19 +211,18 @@ p {
 
 .btn {
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 9px 16px;
+  border-radius: 10px;
+  padding: 8px 14px;
   background: var(--surface);
   color: var(--text);
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   transition: 0.2s ease;
-  box-shadow: 0 8px 18px rgba(88, 45, 80, 0.08);
 }
 
 .btn.primary {
-  background: linear-gradient(135deg, var(--primary), #f2a2c4);
-  border-color: transparent;
+  background: var(--primary);
+  border-color: var(--primary);
   color: #fff;
 }
 
@@ -245,7 +234,6 @@ p {
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);
-  box-shadow: none;
 }
 
 .btn:disabled {
@@ -261,8 +249,8 @@ p {
 
 .profile-card {
   background: var(--surface);
-  border-radius: 22px;
-  padding: 22px;
+  border-radius: 16px;
+  padding: 20px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   display: flex;
@@ -293,8 +281,8 @@ p {
 
 .collection-panel {
   background: var(--surface);
-  border-radius: 22px;
-  padding: 22px;
+  border-radius: 16px;
+  padding: 20px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   display: flex;
@@ -394,8 +382,8 @@ p {
 .calendar-board,
 .calendar-side {
   background: var(--surface);
-  border-radius: 22px;
-  padding: 22px;
+  border-radius: 16px;
+  padding: 20px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
 }
@@ -431,7 +419,7 @@ p {
 }
 
 .calendar-cell {
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--surface-alt);
   padding: 8px;
@@ -440,11 +428,6 @@ p {
   align-items: flex-start;
   gap: 8px;
   cursor: pointer;
-  transition: 0.2s ease;
-}
-
-.calendar-cell:hover {
-  transform: translateY(-2px);
 }
 
 .calendar-cell.is-empty {
@@ -458,7 +441,7 @@ p {
 }
 
 .calendar-cell.is-selected {
-  background: #ffeaf4;
+  background: #eaf1ff;
   border-color: var(--primary);
 }
 
@@ -544,8 +527,8 @@ p {
 
 .event-item {
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 14px;
+  border-radius: 12px;
+  padding: 12px;
   margin-bottom: 12px;
   background: var(--surface-alt);
 }
