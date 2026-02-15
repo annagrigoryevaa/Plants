@@ -208,11 +208,14 @@
             <div class="plant-photos-card">
               <h3>Фотодневник растения</h3>
               <form id="photoForm" class="photo-form">
-                <label for="photoFile">Добавить фото</label>
-                <input id="photoFile" type="file" accept="image/*" />
-                <label for="photoDate">Дата фото (необязательно)</label>
-                <input id="photoDate" type="date" />
-                <button class="btn primary" type="submit">Загрузить</button>
+                <div class="photo-toolbar">
+                  <label class="photo-upload">
+                    <input id="photoFile" type="file" accept="image/*" />
+                    <span>Выбрать фото</span>
+                  </label>
+                  <input id="photoDate" type="date" aria-label="Дата фото" />
+                  <button class="btn primary" type="submit">Загрузить</button>
+                </div>
               </form>
               <div class="photo-grid" id="photoGrid"></div>
               <div class="empty" id="photoEmpty">
@@ -294,6 +297,14 @@
           </div>
         </section>
       </main>
+
+      <div id="photoModal" class="photo-modal" aria-hidden="true">
+        <div class="photo-modal-content" role="dialog" aria-modal="true">
+          <button class="photo-modal-close" type="button" aria-label="Закрыть фото">×</button>
+          <img id="photoModalImage" alt="Фото растения" />
+          <div class="photo-modal-date" id="photoModalDate"></div>
+        </div>
+      </div>
 
       <footer class="footer">
         Сделано для удобного ухода за домашними растениями.

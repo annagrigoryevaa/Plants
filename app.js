@@ -107,6 +107,10 @@ document.addEventListener("DOMContentLoaded", () => {
     photoDate: document.getElementById("photoDate"),
     photoGrid: document.getElementById("photoGrid"),
     photoEmpty: document.getElementById("photoEmpty"),
+    photoModal: document.getElementById("photoModal"),
+    photoModalImage: document.getElementById("photoModalImage"),
+    photoModalDate: document.getElementById("photoModalDate"),
+    photoModalClose: document.querySelector(".photo-modal-close"),
     plantCalendarMonth: document.getElementById("plantCalendarMonth"),
     plantCalendarGrid: document.getElementById("plantCalendarGrid"),
     plantPrevMonth: document.getElementById("plantPrevMonth"),
@@ -320,6 +324,39 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     uploadPlantPhoto();
+  });
+
+  dom.photoGrid.addEventListener("click", (event) => {
+    const card = event.target.closest(".photo-card");
+    if (!card) {
+      return;
+    }
+    const index = Number(card.dataset.index);
+    const photo = state.plantDetail.photos[index];
+    if (!photo) {
+      return;
+    }
+    openPhotoModal(photo);
+  });
+
+  dom.photoModal?.addEventListener("click", (event) => {
+    if (event.target === dom.photoModal) {
+      closePhotoModal();
+    }
+  });
+
+  dom.photoModalClose?.addEventListener("click", () => {
+    closePhotoModal();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (
+      event.key === "Escape" &&
+      dom.photoModal &&
+      dom.photoModal.classList.contains("is-active")
+    ) {
+      closePhotoModal();
+    }
   });
 
   dom.plantRemoveBtn.addEventListener("click", () => {
@@ -554,9 +591,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderPlantPhotos() {
     dom.photoGrid.innerHTML = "";
-    state.plantDetail.photos.forEach((photo) => {
+    state.plantDetail.photos.forEach((photo, index) => {
       const card = document.createElement("div");
       card.className = "photo-card";
+      card.dataset.index = `${index}`;
       const img = document.createElement("img");
       img.src = photo.url;
       img.alt = "Фото растения";
@@ -564,10 +602,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const meta = document.createElement("div");
       meta.className = "photo-meta";
       meta.textContent = photo.takenAt
-        ? `Дата: ${formatDate(photo.takenAt)}`
-        : `Загружено: ${formatDate(
-            photo.createdAt ? photo.createdAt.slice(0, 10) : ""
-          )}`;
+        ? formatDate(photo.takenAt)
+        : formatDate(photo.createdAt ? photo.createdAt.slice(0, 10) : "");
       card.appendChild(img);
       card.appendChild(meta);
       dom.photoGrid.appendChild(card);
@@ -892,6 +928,23 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       showError("Не удалось загрузить фото.", error);
     }
+  }
+
+  function openPhotoModal(photo) {
+    dom.photoModalImage.src = photo.url;
+    dom.photoModalDate.textContent = photo.takenAt
+      ? `Дата: ${formatDate(photo.takenAt)}`
+      : `Загружено: ${formatDate(
+          photo.createdAt ? photo.createdAt.slice(0, 10) : ""
+        )}`;
+    dom.photoModal.classList.add("is-active");
+    dom.photoModal.setAttribute("aria-hidden", "false");
+  }
+
+  function closePhotoModal() {
+    dom.photoModal.classList.remove("is-active");
+    dom.photoModal.setAttribute("aria-hidden", "true");
+    dom.photoModalImage.src = "";
   }
 
   function renderCalendar({ grid, monthLabel, monthCursor, selectedDate, events }) {

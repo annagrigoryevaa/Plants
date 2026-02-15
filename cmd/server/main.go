@@ -630,10 +630,19 @@ func (a *App) listCatalog(ctx context.Context, limit, offset int, query string) 
 	args := []interface{}{}
 	filters := []string{}
 	if query != "" {
-		filters = append(filters, fmt.Sprintf("name ILIKE $%d", len(args)+1))
+		filters = append(filters, fmt.Sprintf("p.name ILIKE $%d", len(args)+1))
 		args = append(args, "%"+query+"%")
 	}
-	sqlQuery := "SELECT id, name, light, water, fussiness, image FROM catalog_plants"
+	sqlQuery := `SELECT p.id, p.name, p.light, p.water, p.fussiness,
+		COALESCE(ph.image_url, p.image) AS image
+		FROM catalog_plants p
+		LEFT JOIN LATERAL (
+			SELECT image_url
+			FROM plant_photos
+			WHERE plant_id = p.id
+			ORDER BY COALESCE(taken_at, created_at) DESC, created_at DESC
+			LIMIT 1
+		) ph ON true`
 	if len(filters) > 0 {
 		sqlQuery += " WHERE " + strings.Join(filters, " AND ")
 	}
@@ -669,7 +678,17 @@ func (a *App) getPlant(ctx context.Context, plantID string) (Plant, error) {
 	var plant Plant
 	err := a.db.QueryRowContext(
 		ctx,
-		"SELECT id, name, light, water, fussiness, image FROM catalog_plants WHERE id = $1",
+		`SELECT p.id, p.name, p.light, p.water, p.fussiness,
+			COALESCE(ph.image_url, p.image) AS image
+		 FROM catalog_plants p
+		 LEFT JOIN LATERAL (
+			SELECT image_url
+			FROM plant_photos
+			WHERE plant_id = p.id
+			ORDER BY COALESCE(taken_at, created_at) DESC, created_at DESC
+			LIMIT 1
+		 ) ph ON true
+		 WHERE p.id = $1`,
 		plantID,
 	).Scan(&plant.ID, &plant.Name, &plant.Light, &plant.Water, &plant.Fussiness, &plant.Image)
 	if err != nil {
@@ -721,9 +740,17 @@ func (a *App) listCollection(ctx context.Context) ([]string, error) {
 
 func (a *App) listCollectionPlants(ctx context.Context) ([]Plant, error) {
 	rows, err := a.db.QueryContext(ctx, `
-		SELECT p.id, p.name, p.light, p.water, p.fussiness, p.image
+		SELECT p.id, p.name, p.light, p.water, p.fussiness,
+			COALESCE(ph.image_url, p.image) AS image
 		FROM catalog_plants p
 		JOIN collection c ON c.plant_id = p.id
+		LEFT JOIN LATERAL (
+			SELECT image_url
+			FROM plant_photos
+			WHERE plant_id = p.id
+			ORDER BY COALESCE(taken_at, created_at) DESC, created_at DESC
+			LIMIT 1
+		) ph ON true
 		ORDER BY c.created_at ASC
 	`)
 	if err != nil {
