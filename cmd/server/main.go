@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -13,6 +14,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,10 +45,17 @@ type Event struct {
 	CreatedAt  string `json:"createdAt"`
 }
 
+type Photo struct {
+	ID        string `json:"id"`
+	PlantID   string `json:"plantId"`
+	URL       string `json:"url"`
+	TakenAt   string `json:"takenAt"`
+	CreatedAt string `json:"createdAt"`
+}
+
 type App struct {
-	db         *sql.DB
-	catalog    []Plant
-	plantIndex map[string]Plant
+	db        *sql.DB
+	uploadDir string
 }
 
 const (
@@ -54,6 +64,7 @@ const (
 	isoMonthLayout   = "2006-01"
 	maxBodySizeBytes = 1 << 20
 	dbTimeout        = 4 * time.Second
+	uploadMaxBytes   = 8 << 20
 )
 
 var (
@@ -61,6 +72,12 @@ var (
 		"watered":    true,
 		"repotted":   true,
 		"fertilized": true,
+	}
+	allowedImageTypes = map[string]string{
+		"image/jpeg": ".jpg",
+		"image/png":  ".png",
+		"image/gif":  ".gif",
+		"image/webp": ".webp",
 	}
 	errNotFound = errors.New("not found")
 )
@@ -76,9 +93,14 @@ func main() {
 	mux.HandleFunc("/api/catalog", app.handleCatalog)
 	mux.HandleFunc("/api/profile", app.handleProfile)
 	mux.HandleFunc("/api/collection", app.handleCollection)
+	mux.HandleFunc("/api/collection/plants", app.handleCollectionPlants)
 	mux.HandleFunc("/api/collection/", app.handleCollectionItem)
 	mux.HandleFunc("/api/events", app.handleEvents)
 	mux.HandleFunc("/api/events/", app.handleEventItem)
+	mux.HandleFunc("/api/plants/", app.handlePlantRoutes)
+
+	uploads := http.StripPrefix("/uploads/", http.FileServer(http.Dir(app.uploadDir)))
+	mux.Handle("/uploads/", uploads)
 
 	fileServer := http.FileServer(http.Dir("."))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -104,12 +126,6 @@ func main() {
 }
 
 func newApp() (*App, error) {
-	catalog := defaultCatalog()
-	plantIndex := make(map[string]Plant, len(catalog))
-	for _, plant := range catalog {
-		plantIndex[plant.ID] = plant
-	}
-
 	db, err := openDB()
 	if err != nil {
 		return nil, err
@@ -120,11 +136,14 @@ func newApp() (*App, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := seedCatalog(ctx, db, defaultCatalog()); err != nil {
+		db.Close()
+		return nil, err
+	}
 
 	return &App{
-		db:         db,
-		catalog:    catalog,
-		plantIndex: plantIndex,
+		db:        db,
+		uploadDir: getenv("UPLOAD_DIR", filepath.Join("data", "uploads")),
 	}, nil
 }
 
@@ -133,7 +152,22 @@ func (a *App) handleCatalog(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, r.Method, http.MethodGet)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string][]Plant{"catalog": a.catalog})
+	limit := clampInt(parseInt(r.URL.Query().Get("limit"), 12), 1, 40)
+	offset := clampInt(parseInt(r.URL.Query().Get("offset"), 0), 0, 1000000)
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	ctx, cancel := a.requestContext(r)
+	defer cancel()
+	items, hasMore, err := a.listCatalog(ctx, limit, offset, query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	nextOffset := offset + len(items)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items":      items,
+		"nextOffset": nextOffset,
+		"hasMore":    hasMore,
+	})
 }
 
 func (a *App) handleProfile(w http.ResponseWriter, r *http.Request) {
@@ -194,12 +228,16 @@ func (a *App) handleCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "plantId обязателен")
 			return
 		}
-		if _, ok := a.plantIndex[plantID]; !ok {
-			writeError(w, http.StatusBadRequest, "неизвестное растение")
-			return
-		}
 		ctx, cancel := a.requestContext(r)
 		defer cancel()
+		if err := a.plantExists(ctx, plantID); err != nil {
+			if errors.Is(err, errNotFound) {
+				writeError(w, http.StatusBadRequest, "неизвестное растение")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		collection, err := a.addToCollection(ctx, plantID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -209,6 +247,25 @@ func (a *App) handleCollection(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w, r.Method, http.MethodGet, http.MethodPost)
 	}
+}
+
+func (a *App) handleCollectionPlants(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/collection/plants" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r.Method, http.MethodGet)
+		return
+	}
+	ctx, cancel := a.requestContext(r)
+	defer cancel()
+	plants, err := a.listCollectionPlants(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]Plant{"plants": plants})
 }
 
 func (a *App) handleCollectionItem(w http.ResponseWriter, r *http.Request) {
@@ -288,8 +345,14 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "plantId обязателен")
 			return
 		}
-		if _, ok := a.plantIndex[input.PlantID]; !ok {
-			writeError(w, http.StatusBadRequest, "неизвестное растение")
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		if err := a.plantExists(ctx, input.PlantID); err != nil {
+			if errors.Is(err, errNotFound) {
+				writeError(w, http.StatusBadRequest, "неизвестное растение")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if !allowedEventTypes[input.Type] {
@@ -310,8 +373,6 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		ctx, cancel := a.requestContext(r)
-		defer cancel()
 		inCollection, err := a.isInCollection(ctx, input.PlantID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -360,6 +421,182 @@ func (a *App) handleEventItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *App) handlePlantRoutes(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/plants/")
+	path = strings.Trim(path, "/")
+	if path == "" {
+		http.NotFound(w, r)
+		return
+	}
+	parts := strings.Split(path, "/")
+	plantID := strings.TrimSpace(parts[0])
+	if plantID == "" {
+		writeError(w, http.StatusBadRequest, "plantId обязателен")
+		return
+	}
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, r.Method, http.MethodGet)
+			return
+		}
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		plant, err := a.getPlant(ctx, plantID)
+		if err != nil {
+			if errors.Is(err, errNotFound) {
+				writeError(w, http.StatusNotFound, "растение не найдено")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, plant)
+		return
+	}
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "photos":
+			a.handlePlantPhotos(w, r, plantID)
+			return
+		case "events":
+			a.handlePlantEvents(w, r, plantID)
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}
+	http.NotFound(w, r)
+}
+
+func (a *App) handlePlantEvents(w http.ResponseWriter, r *http.Request, plantID string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, r.Method, http.MethodGet)
+		return
+	}
+	month := strings.TrimSpace(r.URL.Query().Get("month"))
+	var monthStart, monthEnd time.Time
+	var err error
+	if month != "" {
+		monthStart, monthEnd, err = monthRange(month)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "неверный формат месяца")
+			return
+		}
+	}
+	ctx, cancel := a.requestContext(r)
+	defer cancel()
+	events, err := a.listPlantEvents(ctx, plantID, monthStart, monthEnd)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]Event{"events": events})
+}
+
+func (a *App) handlePlantPhotos(w http.ResponseWriter, r *http.Request, plantID string) {
+	switch r.Method {
+	case http.MethodGet:
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		photos, err := a.listPlantPhotos(ctx, plantID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string][]Photo{"photos": photos})
+	case http.MethodPost:
+		ctx, cancel := a.requestContext(r)
+		defer cancel()
+		inCollection, err := a.isInCollection(ctx, plantID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !inCollection {
+			writeError(w, http.StatusBadRequest, "растение не в коллекции")
+			return
+		}
+		if err := a.plantExists(ctx, plantID); err != nil {
+			if errors.Is(err, errNotFound) {
+				writeError(w, http.StatusNotFound, "растение не найдено")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, uploadMaxBytes)
+		if err := r.ParseMultipartForm(uploadMaxBytes); err != nil {
+			writeError(w, http.StatusBadRequest, "не удалось обработать файл")
+			return
+		}
+		file, header, err := r.FormFile("photo")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "файл photo обязателен")
+			return
+		}
+		defer file.Close()
+
+		buf := make([]byte, 512)
+		n, _ := file.Read(buf)
+		contentType := http.DetectContentType(buf[:n])
+		ext, ok := allowedImageTypes[contentType]
+		if !ok {
+			writeError(w, http.StatusBadRequest, "поддерживаются только изображения (jpg, png, gif, webp)")
+			return
+		}
+		filename := header.Filename
+		if filename != "" {
+			if customExt := strings.ToLower(filepath.Ext(filename)); customExt != "" {
+				if isAllowedImageExt(customExt) {
+					ext = customExt
+				}
+			}
+		}
+		if err := os.MkdirAll(a.uploadDir, 0o755); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		photoID := newID()
+		filename = fmt.Sprintf("%s-%s%s", plantID, photoID, ext)
+		fullPath := filepath.Join(a.uploadDir, filename)
+		out, err := os.Create(fullPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		reader := io.MultiReader(bytes.NewReader(buf[:n]), file)
+		if _, err := io.Copy(out, reader); err != nil {
+			out.Close()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := out.Close(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		var takenAt time.Time
+		if value := strings.TrimSpace(r.FormValue("takenAt")); value != "" {
+			parsed, err := time.Parse(isoDateLayout, value)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "неверный формат даты фотографии")
+				return
+			}
+			takenAt = parsed
+		}
+		photo, err := a.createPlantPhoto(ctx, plantID, "/uploads/"+filename, takenAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusCreated, photo)
+	default:
+		methodNotAllowed(w, r.Method, http.MethodGet, http.MethodPost)
+	}
+}
+
 func (a *App) requestContext(r *http.Request) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), dbTimeout)
 }
@@ -389,8 +626,80 @@ func (a *App) updateProfile(ctx context.Context, name string) (Profile, error) {
 	return Profile{Name: updated}, nil
 }
 
+func (a *App) listCatalog(ctx context.Context, limit, offset int, query string) ([]Plant, bool, error) {
+	args := []interface{}{}
+	filters := []string{}
+	if query != "" {
+		filters = append(filters, fmt.Sprintf("name ILIKE $%d", len(args)+1))
+		args = append(args, "%"+query+"%")
+	}
+	sqlQuery := "SELECT id, name, light, water, fussiness, image FROM catalog_plants"
+	if len(filters) > 0 {
+		sqlQuery += " WHERE " + strings.Join(filters, " AND ")
+	}
+	sqlQuery += fmt.Sprintf(" ORDER BY name ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
+	args = append(args, limit+1, offset)
+
+	rows, err := a.db.QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	plants := make([]Plant, 0)
+	for rows.Next() {
+		var plant Plant
+		if err := rows.Scan(&plant.ID, &plant.Name, &plant.Light, &plant.Water, &plant.Fussiness, &plant.Image); err != nil {
+			return nil, false, err
+		}
+		plants = append(plants, plant)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := false
+	if len(plants) > limit {
+		hasMore = true
+		plants = plants[:limit]
+	}
+	return plants, hasMore, nil
+}
+
+func (a *App) getPlant(ctx context.Context, plantID string) (Plant, error) {
+	var plant Plant
+	err := a.db.QueryRowContext(
+		ctx,
+		"SELECT id, name, light, water, fussiness, image FROM catalog_plants WHERE id = $1",
+		plantID,
+	).Scan(&plant.ID, &plant.Name, &plant.Light, &plant.Water, &plant.Fussiness, &plant.Image)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Plant{}, errNotFound
+		}
+		return Plant{}, err
+	}
+	return plant, nil
+}
+
+func (a *App) plantExists(ctx context.Context, plantID string) error {
+	var exists bool
+	err := a.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM catalog_plants WHERE id = $1)", plantID).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errNotFound
+	}
+	return nil
+}
+
 func (a *App) listCollection(ctx context.Context) ([]string, error) {
-	rows, err := a.db.QueryContext(ctx, "SELECT plant_id FROM collection ORDER BY created_at ASC")
+	rows, err := a.db.QueryContext(ctx, `
+		SELECT c.plant_id
+		FROM collection c
+		JOIN catalog_plants p ON p.id = c.plant_id
+		ORDER BY c.created_at ASC
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -402,14 +711,38 @@ func (a *App) listCollection(ctx context.Context) ([]string, error) {
 		if err := rows.Scan(&plantID); err != nil {
 			return nil, err
 		}
-		if _, ok := a.plantIndex[plantID]; ok {
-			collection = append(collection, plantID)
-		}
+		collection = append(collection, plantID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return collection, nil
+}
+
+func (a *App) listCollectionPlants(ctx context.Context) ([]Plant, error) {
+	rows, err := a.db.QueryContext(ctx, `
+		SELECT p.id, p.name, p.light, p.water, p.fussiness, p.image
+		FROM catalog_plants p
+		JOIN collection c ON c.plant_id = p.id
+		ORDER BY c.created_at ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	plants := make([]Plant, 0)
+	for rows.Next() {
+		var plant Plant
+		if err := rows.Scan(&plant.ID, &plant.Name, &plant.Light, &plant.Water, &plant.Fussiness, &plant.Image); err != nil {
+			return nil, err
+		}
+		plants = append(plants, plant)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return plants, nil
 }
 
 func (a *App) addToCollection(ctx context.Context, plantID string) ([]string, error) {
@@ -448,6 +781,41 @@ func (a *App) listEvents(ctx context.Context, monthStart, monthEnd time.Time) ([
 	args := []interface{}{}
 	if !monthStart.IsZero() && !monthEnd.IsZero() {
 		query += " WHERE event_date >= $1 AND event_date < $2"
+		args = append(args, monthStart, monthEnd)
+	}
+	query += " ORDER BY created_at DESC"
+
+	rows, err := a.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make([]Event, 0)
+	for rows.Next() {
+		var event Event
+		var eventType string
+		var eventDate time.Time
+		var createdAt time.Time
+		if err := rows.Scan(&event.ID, &event.PlantID, &eventType, &eventDate, &event.Fertilizer, &event.Notes, &createdAt); err != nil {
+			return nil, err
+		}
+		event.Type = eventType
+		event.Date = eventDate.Format(isoDateLayout)
+		event.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+func (a *App) listPlantEvents(ctx context.Context, plantID string, monthStart, monthEnd time.Time) ([]Event, error) {
+	query := "SELECT id, plant_id, event_type, event_date, fertilizer, notes, created_at FROM events WHERE plant_id = $1"
+	args := []interface{}{plantID}
+	if !monthStart.IsZero() && !monthEnd.IsZero() {
+		query += " AND event_date >= $2 AND event_date < $3"
 		args = append(args, monthStart, monthEnd)
 	}
 	query += " ORDER BY created_at DESC"
@@ -525,6 +893,76 @@ func (a *App) deleteEvent(ctx context.Context, eventID string) error {
 	return nil
 }
 
+func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, error) {
+	rows, err := a.db.QueryContext(
+		ctx,
+		`SELECT id, plant_id, image_url, taken_at, created_at
+		 FROM plant_photos
+		 WHERE plant_id = $1
+		 ORDER BY COALESCE(taken_at, created_at) DESC, created_at DESC`,
+		plantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	photos := make([]Photo, 0)
+	for rows.Next() {
+		var photo Photo
+		var takenAt sql.NullTime
+		var createdAt time.Time
+		if err := rows.Scan(&photo.ID, &photo.PlantID, &photo.URL, &takenAt, &createdAt); err != nil {
+			return nil, err
+		}
+		if takenAt.Valid {
+			photo.TakenAt = takenAt.Time.Format(isoDateLayout)
+		}
+		photo.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		photos = append(photos, photo)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return photos, nil
+}
+
+func (a *App) createPlantPhoto(ctx context.Context, plantID, url string, takenAt time.Time) (Photo, error) {
+	photo := Photo{
+		ID:      newID(),
+		PlantID: plantID,
+		URL:     url,
+	}
+	var createdAt time.Time
+	if takenAt.IsZero() {
+		err := a.db.QueryRowContext(
+			ctx,
+			"INSERT INTO plant_photos (id, plant_id, image_url) VALUES ($1, $2, $3) RETURNING created_at",
+			photo.ID,
+			photo.PlantID,
+			photo.URL,
+		).Scan(&createdAt)
+		if err != nil {
+			return Photo{}, err
+		}
+	} else {
+		err := a.db.QueryRowContext(
+			ctx,
+			"INSERT INTO plant_photos (id, plant_id, image_url, taken_at) VALUES ($1, $2, $3, $4) RETURNING taken_at, created_at",
+			photo.ID,
+			photo.PlantID,
+			photo.URL,
+			takenAt,
+		).Scan(&takenAt, &createdAt)
+		if err != nil {
+			return Photo{}, err
+		}
+		photo.TakenAt = takenAt.Format(isoDateLayout)
+	}
+	photo.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+	return photo, nil
+}
+
 func openDB() (*sql.DB, error) {
 	dsn := getDatabaseURL()
 	db, err := sql.Open("pgx", dsn)
@@ -568,6 +1006,15 @@ func getDatabaseURL() string {
 
 func ensureSchema(ctx context.Context, db *sql.DB) error {
 	statements := []string{
+		`CREATE TABLE IF NOT EXISTS catalog_plants (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			light TEXT NOT NULL,
+			water TEXT NOT NULL,
+			fussiness TEXT NOT NULL,
+			image TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 		`CREATE TABLE IF NOT EXISTS profiles (
 			id SMALLINT PRIMARY KEY,
 			name TEXT NOT NULL DEFAULT ''
@@ -586,11 +1033,48 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			CHECK ((event_type != 'fertilized') OR (length(trim(fertilizer)) > 0))
 		)`,
+		`CREATE TABLE IF NOT EXISTS plant_photos (
+			id TEXT PRIMARY KEY,
+			plant_id TEXT NOT NULL,
+			image_url TEXT NOT NULL,
+			taken_at DATE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_date ON events (event_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_plant ON events (plant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_photos_plant ON plant_photos (plant_id)`,
 		`INSERT INTO profiles (id, name) VALUES (1, '') ON CONFLICT (id) DO NOTHING`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func seedCatalog(ctx context.Context, db *sql.DB, plants []Plant) error {
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM catalog_plants").Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	for _, plant := range plants {
+		_, err := db.ExecContext(
+			ctx,
+			`INSERT INTO catalog_plants (id, name, light, water, fussiness, image)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (id) DO NOTHING`,
+			plant.ID,
+			plant.Name,
+			plant.Light,
+			plant.Water,
+			plant.Fussiness,
+			plant.Image,
+		)
+		if err != nil {
 			return err
 		}
 	}
@@ -720,6 +1204,37 @@ func getenv(key, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
 		return fallback
+	}
+	return value
+}
+
+func isAllowedImageExt(ext string) bool {
+	for _, allowed := range allowedImageTypes {
+		if allowed == ext {
+			return true
+		}
+	}
+	return false
+}
+
+func parseInt(value string, fallback int) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func clampInt(value, min, max int) int {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
 	}
 	return value
 }

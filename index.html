@@ -17,72 +17,22 @@
           </div>
         </div>
         <nav class="tabs" role="tablist">
-          <button class="tab is-active" data-view="catalog" type="button">Каталог</button>
-          <button class="tab" data-view="collection" type="button">Моя коллекция</button>
-          <button class="tab" data-view="calendar" type="button">Календарь ухода</button>
+          <button class="tab is-active" data-view="home" type="button">Главная</button>
+          <button class="tab" data-view="profile" type="button">Профиль</button>
         </nav>
       </header>
 
       <main>
-        <section id="catalog" class="view is-active">
+        <section id="home" class="view is-active">
           <div class="section-head">
             <div>
-              <h2>Справочник домашних растений</h2>
-              <p>Коллекция растений с фото и краткой информацией об уходе.</p>
+              <h2>Главная</h2>
+              <p>Календарь ухода, моя коллекция и справочник растений.</p>
             </div>
-            <div class="search">
-              <label class="sr-only" for="catalogSearch">Поиск по названию</label>
-              <input id="catalogSearch" type="search" placeholder="Поиск по названию" />
-            </div>
-          </div>
-          <div class="catalog-grid" id="catalogGrid"></div>
-          <div class="empty" id="catalogEmpty">
-            Ничего не найдено. Попробуйте другое название.
-          </div>
-        </section>
-
-        <section id="collection" class="view">
-          <div class="section-head">
-            <div>
-              <h2>Личный профиль</h2>
-              <p>Соберите свою коллекцию и следите за уходом за растениями.</p>
-            </div>
-          </div>
-
-          <div class="profile-grid">
-            <div class="profile-card">
-              <label for="profileName">Ваше имя</label>
-              <input id="profileName" type="text" placeholder="Например, Анна" />
-              <div class="stats">
-                <div>
-                  <span class="stat-label">Растений в коллекции</span>
-                  <span class="stat-value" id="statPlants">0</span>
-                </div>
-                <div>
-                  <span class="stat-label">Событий ухода</span>
-                  <span class="stat-value" id="statEvents">0</span>
-                </div>
-              </div>
-              <p class="hint">Данные сохраняются на сервере приложения.</p>
-            </div>
-
-            <div class="collection-panel">
-              <h3>Моя коллекция</h3>
-              <div class="collection-grid" id="collectionGrid"></div>
-              <div class="empty" id="collectionEmpty">
-                Пока пусто. Добавьте растения из справочника.
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="calendar" class="view">
-          <div class="section-head">
-            <div>
-              <h2>Календарь ухода</h2>
-              <p>
-                Отмечайте полив, пересадку и подкормку с указанием удобрения.
-              </p>
+            <div class="section-actions">
+              <button class="btn primary" type="button" data-action="scroll-catalog">
+                Перейти к справочнику
+              </button>
             </div>
           </div>
 
@@ -157,6 +107,186 @@
                 </div>
                 <div id="eventList"></div>
                 <div class="empty" id="eventEmpty">
+                  Пока нет записей за выбранный месяц.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <section class="carousel-section">
+            <div class="section-head">
+              <div>
+                <h2>Мои растения</h2>
+                <p>Открывайте карточки и ведите журнал ухода.</p>
+              </div>
+            </div>
+            <div class="carousel-track" id="collectionCarousel"></div>
+            <div class="empty" id="collectionCarouselEmpty">
+              Пока нет растений в коллекции.
+            </div>
+          </section>
+
+          <section id="catalogSection" class="catalog-section">
+            <div class="section-head">
+              <div>
+                <h2>Справочник растений</h2>
+                <p>Бесконечная лента с уходом и быстрым добавлением.</p>
+              </div>
+              <div class="search">
+                <label class="sr-only" for="catalogSearch">Поиск по названию</label>
+                <input id="catalogSearch" type="search" placeholder="Поиск по названию" />
+              </div>
+            </div>
+            <div class="catalog-grid" id="catalogFeed"></div>
+            <div class="catalog-sentinel" id="catalogSentinel">Загрузка...</div>
+            <div class="empty" id="catalogEmpty">
+              Ничего не найдено. Попробуйте другое название.
+            </div>
+          </section>
+        </section>
+
+        <section id="profile" class="view">
+          <div class="section-head">
+            <div>
+              <h2>Личный профиль</h2>
+              <p>Соберите свою коллекцию и следите за уходом за растениями.</p>
+            </div>
+          </div>
+
+          <div class="profile-grid">
+            <div class="profile-card">
+              <label for="profileName">Ваше имя</label>
+              <input id="profileName" type="text" placeholder="Например, Анна" />
+              <div class="stats">
+                <div>
+                  <span class="stat-label">Растений в коллекции</span>
+                  <span class="stat-value" id="statPlants">0</span>
+                </div>
+                <div>
+                  <span class="stat-label">Событий ухода</span>
+                  <span class="stat-value" id="statEvents">0</span>
+                </div>
+              </div>
+              <p class="hint">Данные сохраняются на сервере приложения.</p>
+            </div>
+
+            <div class="collection-panel">
+              <h3>Моя коллекция</h3>
+              <div class="collection-grid" id="collectionGrid"></div>
+              <div class="empty" id="collectionEmpty">
+                Пока пусто. Добавьте растения из справочника.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="plant" class="view">
+          <div class="section-head">
+            <button class="btn ghost" type="button" data-action="back-home">← На главную</button>
+            <div>
+              <h2 id="plantTitle">Карточка растения</h2>
+              <p id="plantSubtitle">Журнал ухода и фото по конкретному растению.</p>
+            </div>
+          </div>
+
+          <div class="plant-detail-grid">
+            <div class="plant-info-card">
+              <img id="plantImage" class="plant-photo" alt="" />
+              <div class="plant-body">
+                <h3 id="plantName"></h3>
+                <div class="plant-tags">
+                  <div><span>Свет:</span> <span id="plantLight"></span></div>
+                  <div><span>Полив:</span> <span id="plantWater"></span></div>
+                  <div><span>Привередливость:</span> <span id="plantFussiness"></span></div>
+                </div>
+                <div class="plant-actions">
+                  <button class="btn secondary" type="button" id="plantRemoveBtn">Удалить из коллекции</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="plant-photos-card">
+              <h3>Фотодневник растения</h3>
+              <form id="photoForm" class="photo-form">
+                <label for="photoFile">Добавить фото</label>
+                <input id="photoFile" type="file" accept="image/*" />
+                <label for="photoDate">Дата фото (необязательно)</label>
+                <input id="photoDate" type="date" />
+                <button class="btn primary" type="submit">Загрузить</button>
+              </form>
+              <div class="photo-grid" id="photoGrid"></div>
+              <div class="empty" id="photoEmpty">
+                Пока нет фотографий для этого растения.
+              </div>
+            </div>
+          </div>
+
+          <div class="calendar-layout">
+            <div class="calendar-board">
+              <div class="calendar-header">
+                <button class="btn ghost" id="plantPrevMonth" type="button" aria-label="Предыдущий месяц">
+                  ←
+                </button>
+                <div class="calendar-month" id="plantCalendarMonth"></div>
+                <button class="btn ghost" id="plantNextMonth" type="button" aria-label="Следующий месяц">
+                  →
+                </button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Пн</span>
+                <span>Вт</span>
+                <span>Ср</span>
+                <span>Чт</span>
+                <span>Пт</span>
+                <span>Сб</span>
+                <span>Вс</span>
+              </div>
+              <div class="calendar-grid" id="plantCalendarGrid"></div>
+              <div class="calendar-legend">
+                <div><span class="legend-dot watered"></span>Полив</div>
+                <div><span class="legend-dot repotted"></span>Пересадка</div>
+                <div><span class="legend-dot fertilized"></span>Подкормка</div>
+              </div>
+            </div>
+
+            <div class="calendar-side">
+              <form id="plantEventForm" class="event-form">
+                <h3>Новое событие</h3>
+                <label for="plantEventType">Тип ухода</label>
+                <select id="plantEventType">
+                  <option value="watered">Полив</option>
+                  <option value="repotted">Пересадка</option>
+                  <option value="fertilized">Подкормка</option>
+                </select>
+                <label for="plantEventDate">Дата</label>
+                <input id="plantEventDate" type="date" />
+
+                <div id="plantFertilizerField" class="fertilizer-field is-hidden">
+                  <label for="plantEventFertilizer">Удобрение</label>
+                  <input
+                    id="plantEventFertilizer"
+                    type="text"
+                    placeholder="Например, комплексное универсальное"
+                  />
+                </div>
+
+                <label for="plantEventNotes">Заметка (необязательно)</label>
+                <textarea
+                  id="plantEventNotes"
+                  rows="3"
+                  placeholder="Например, увеличили объем воды"
+                ></textarea>
+
+                <button class="btn primary" type="submit">Сохранить событие</button>
+              </form>
+
+              <div class="event-list">
+                <div class="event-list-head">
+                  <h3>События за месяц</h3>
+                  <span class="event-count" id="plantEventCount"></span>
+                </div>
+                <div id="plantEventList"></div>
+                <div class="empty" id="plantEventEmpty">
                   Пока нет записей за выбранный месяц.
                 </div>
               </div>
