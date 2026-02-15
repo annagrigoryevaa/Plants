@@ -822,7 +822,6 @@ document.addEventListener("DOMContentLoaded", () => {
         item.id === plantId ? { ...item, image: imageUrl } : item
       );
     state.collectionPlants = updateInList(state.collectionPlants);
-    state.catalog = updateInList(state.catalog);
     if (state.plantDetail.plant && state.plantDetail.plant.id === plantId) {
       state.plantDetail.plant = { ...state.plantDetail.plant, image: imageUrl };
       renderPlantDetail();
@@ -836,8 +835,23 @@ document.addEventListener("DOMContentLoaded", () => {
     renderCatalog();
   }
 
+  function getCoverPhotoUrl() {
+    if (!state.plantDetail.coverPhotoId) {
+      return "";
+    }
+    const cover = state.plantDetail.photos.find(
+      (photo) => photo.id === state.plantDetail.coverPhotoId
+    );
+    return cover ? cover.url : "";
+  }
+
   async function refreshPlantImage(plantId) {
     try {
+      const coverUrl = getCoverPhotoUrl();
+      if (coverUrl) {
+        updatePlantImage(plantId, coverUrl);
+        return;
+      }
       const plant = await api.get(`/api/plants/${plantId}`);
       updatePlantImage(plantId, plant.image);
     } catch (error) {
@@ -977,6 +991,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ? response.photos
         : [];
       state.plantDetail.coverPhotoId = response?.coverPhotoId || "";
+      await refreshPlantImage(plantId);
     } catch (error) {
       showError("Не удалось загрузить фотографии.", error);
     }
@@ -1074,7 +1089,6 @@ document.addEventListener("DOMContentLoaded", () => {
         `/api/plants/${state.plantDetail.plantId}/photos/${photo.id}`
       );
       await loadPlantPhotos(state.plantDetail.plantId);
-      await refreshPlantImage(state.plantDetail.plantId);
       renderPlantPhotos();
       if (state.plantDetail.photos.length === 0) {
         closePhotoModal();
