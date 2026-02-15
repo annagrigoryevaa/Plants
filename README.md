@@ -44,6 +44,7 @@ psql "postgres://plants:plants@localhost:5432/plants?sslmode=disable"
 
 Схема описана в `db/schema.sql`, можно использовать ее для ручного редактирования.
 Фотографии хранятся в каталоге `data/uploads` и отдаются через `/uploads/...`.
+Каталог растений использует локальные иллюстрации из `assets/catalog`.
 
 ### Переменные окружения
 

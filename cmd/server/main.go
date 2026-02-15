@@ -1054,19 +1054,20 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 }
 
 func seedCatalog(ctx context.Context, db *sql.DB, plants []Plant) error {
-	var count int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM catalog_plants").Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
 	for _, plant := range plants {
 		_, err := db.ExecContext(
 			ctx,
 			`INSERT INTO catalog_plants (id, name, light, water, fussiness, image)
 			 VALUES ($1, $2, $3, $4, $5, $6)
-			 ON CONFLICT (id) DO NOTHING`,
+			 ON CONFLICT (id) DO UPDATE SET
+				name = EXCLUDED.name,
+				light = EXCLUDED.light,
+				water = EXCLUDED.water,
+				fussiness = EXCLUDED.fussiness,
+				image = EXCLUDED.image
+			 WHERE catalog_plants.image IS NULL
+			    OR catalog_plants.image = ''
+			    OR catalog_plants.image ILIKE '%unsplash.com%'`,
 			plant.ID,
 			plant.Name,
 			plant.Light,
@@ -1098,7 +1099,7 @@ func defaultCatalog() []Plant {
 			Light:     "Яркий рассеянный",
 			Water:     "1-2 раза в неделю",
 			Fussiness: "Средняя",
-			Image:     "https://images.unsplash.com/photo-1501004318641-b39e6451bec6?auto=format&fit=crop&w=800&q=60",
+			Image:     "/assets/catalog/monstera.svg",
 		},
 		{
 			ID:        "sansevieria",
@@ -1106,7 +1107,7 @@ func defaultCatalog() []Plant {
 			Light:     "От тени до яркого",
 			Water:     "Раз в 2-3 недели",
 			Fussiness: "Низкая",
-			Image:     "https://images.unsplash.com/photo-1485955900006-10f4d324d411?auto=format&fit=crop&w=800&q=60",
+			Image:     "/assets/catalog/sansevieria.svg",
 		},
 		{
 			ID:        "spathiphyllum",
@@ -1114,7 +1115,7 @@ func defaultCatalog() []Plant {
 			Light:     "Полутень",
 			Water:     "Регулярно, не пересушивать",
 			Fussiness: "Средняя",
-			Image:     "https://images.unsplash.com/photo-1446071103084-c257b5f70672?auto=format&fit=crop&w=800&q=60",
+			Image:     "/assets/catalog/spathiphyllum.svg",
 		},
 		{
 			ID:        "zamioculcas",
@@ -1122,7 +1123,7 @@ func defaultCatalog() []Plant {
 			Light:     "Полутень",
 			Water:     "Раз в 2-3 недели",
 			Fussiness: "Низкая",
-			Image:     "https://images.unsplash.com/photo-1465101046530-73398c7f28ca?auto=format&fit=crop&w=800&q=60",
+			Image:     "/assets/catalog/zamioculcas.svg",
 		},
 		{
 			ID:        "calathea",
@@ -1130,7 +1131,7 @@ func defaultCatalog() []Plant {
 			Light:     "Яркий рассеянный",
 			Water:     "Часто, мягкая вода",
 			Fussiness: "Высокая",
-			Image:     "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=800&q=60",
+			Image:     "/assets/catalog/calathea.svg",
 		},
 		{
 			ID:        "ficus",
@@ -1138,7 +1139,7 @@ func defaultCatalog() []Plant {
 			Light:     "Яркий рассеянный",
 			Water:     "1 раз в неделю",
 			Fussiness: "Средняя",
-			Image:     "https://images.unsplash.com/photo-1471879832106-c7ab9e0cee23?auto=format&fit=crop&w=800&q=60",
+			Image:     "/assets/catalog/ficus.svg",
 		},
 		{
 			ID:        "chlorophytum",
@@ -1146,7 +1147,7 @@ func defaultCatalog() []Plant {
 			Light:     "Полутень",
 			Water:     "1 раз в неделю",
 			Fussiness: "Низкая",
-			Image:     "https://images.unsplash.com/photo-1495195134817-aeb325a55b65?auto=format&fit=crop&w=800&q=60",
+			Image:     "/assets/catalog/chlorophytum.svg",
 		},
 		{
 			ID:        "violet",
@@ -1154,7 +1155,7 @@ func defaultCatalog() []Plant {
 			Light:     "Яркий рассеянный",
 			Water:     "Умеренно, теплой водой",
 			Fussiness: "Средняя",
-			Image:     "https://images.unsplash.com/photo-1477554193778-9562c28588c3?auto=format&fit=crop&w=800&q=60",
+			Image:     "/assets/catalog/violet.svg",
 		},
 	}
 }
