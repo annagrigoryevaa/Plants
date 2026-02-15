@@ -301,7 +301,21 @@
       <div id="photoModal" class="photo-modal" aria-hidden="true">
         <div class="photo-modal-content" role="dialog" aria-modal="true">
           <button class="photo-modal-close" type="button" aria-label="Закрыть фото">×</button>
+          <button class="photo-modal-nav prev" type="button" id="photoModalPrev" aria-label="Предыдущее фото">
+            ←
+          </button>
+          <button class="photo-modal-nav next" type="button" id="photoModalNext" aria-label="Следующее фото">
+            →
+          </button>
           <img id="photoModalImage" alt="Фото растения" />
+          <div class="photo-modal-actions">
+            <button class="btn secondary" type="button" id="photoModalCover">
+              Сделать обложкой
+            </button>
+            <button class="btn ghost danger" type="button" id="photoModalDelete">
+              Удалить
+            </button>
+          </div>
           <div class="photo-modal-date" id="photoModalDate"></div>
         </div>
       </div>

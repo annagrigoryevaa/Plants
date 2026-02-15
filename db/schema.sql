@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS plant_photos (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS plant_covers (
+  plant_id TEXT PRIMARY KEY,
+  photo_id TEXT NOT NULL REFERENCES plant_photos(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_date ON events (event_date);
 CREATE INDEX IF NOT EXISTS idx_events_plant ON events (plant_id);
 CREATE INDEX IF NOT EXISTS idx_photos_plant ON plant_photos (plant_id);

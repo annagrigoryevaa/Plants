@@ -111,6 +111,10 @@ document.addEventListener("DOMContentLoaded", () => {
     photoModalImage: document.getElementById("photoModalImage"),
     photoModalDate: document.getElementById("photoModalDate"),
     photoModalClose: document.querySelector(".photo-modal-close"),
+    photoModalPrev: document.getElementById("photoModalPrev"),
+    photoModalNext: document.getElementById("photoModalNext"),
+    photoModalCover: document.getElementById("photoModalCover"),
+    photoModalDelete: document.getElementById("photoModalDelete"),
     plantCalendarMonth: document.getElementById("plantCalendarMonth"),
     plantCalendarGrid: document.getElementById("plantCalendarGrid"),
     plantPrevMonth: document.getElementById("plantPrevMonth"),
@@ -149,9 +153,11 @@ document.addEventListener("DOMContentLoaded", () => {
       plantId: null,
       plant: null,
       photos: [],
+      coverPhotoId: "",
       monthCursor: new Date(),
       selectedDate: toISODate(new Date()),
     },
+    modalIndex: 0,
   };
 
   dom.eventDate.value = state.selectedDate;
@@ -349,6 +355,28 @@ document.addEventListener("DOMContentLoaded", () => {
     closePhotoModal();
   });
 
+  dom.photoModalPrev?.addEventListener("click", () => {
+    showModalPhoto(state.modalIndex - 1);
+  });
+
+  dom.photoModalNext?.addEventListener("click", () => {
+    showModalPhoto(state.modalIndex + 1);
+  });
+
+  dom.photoModalCover?.addEventListener("click", () => {
+    const photo = state.plantDetail.photos[state.modalIndex];
+    if (photo) {
+      setCoverPhoto(photo);
+    }
+  });
+
+  dom.photoModalDelete?.addEventListener("click", () => {
+    const photo = state.plantDetail.photos[state.modalIndex];
+    if (photo) {
+      deletePhoto(photo);
+    }
+  });
+
   document.addEventListener("keydown", (event) => {
     if (
       event.key === "Escape" &&
@@ -356,6 +384,17 @@ document.addEventListener("DOMContentLoaded", () => {
       dom.photoModal.classList.contains("is-active")
     ) {
       closePhotoModal();
+    }
+    if (
+      dom.photoModal &&
+      dom.photoModal.classList.contains("is-active") &&
+      (event.key === "ArrowRight" || event.key === "ArrowLeft")
+    ) {
+      if (event.key === "ArrowRight") {
+        showModalPhoto(state.modalIndex + 1);
+      } else {
+        showModalPhoto(state.modalIndex - 1);
+      }
     }
   });
 
@@ -606,6 +645,12 @@ document.addEventListener("DOMContentLoaded", () => {
         : formatDate(photo.createdAt ? photo.createdAt.slice(0, 10) : "");
       card.appendChild(img);
       card.appendChild(meta);
+      if (photo.id === state.plantDetail.coverPhotoId) {
+        const badge = document.createElement("div");
+        badge.className = "photo-cover-badge";
+        badge.textContent = "Обложка";
+        card.appendChild(badge);
+      }
       dom.photoGrid.appendChild(card);
     });
     toggleEmpty(dom.photoEmpty, state.plantDetail.photos.length === 0);
@@ -768,6 +813,38 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function updatePlantImage(plantId, imageUrl) {
+    if (!plantId || !imageUrl) {
+      return;
+    }
+    const updateInList = (list) =>
+      list.map((item) =>
+        item.id === plantId ? { ...item, image: imageUrl } : item
+      );
+    state.collectionPlants = updateInList(state.collectionPlants);
+    state.catalog = updateInList(state.catalog);
+    if (state.plantDetail.plant && state.plantDetail.plant.id === plantId) {
+      state.plantDetail.plant = { ...state.plantDetail.plant, image: imageUrl };
+      renderPlantDetail();
+    }
+    const existing = plantIndex.get(plantId);
+    if (existing) {
+      plantIndex.set(plantId, { ...existing, image: imageUrl });
+    }
+    renderCollection();
+    renderCollectionCarousel();
+    renderCatalog();
+  }
+
+  async function refreshPlantImage(plantId) {
+    try {
+      const plant = await api.get(`/api/plants/${plantId}`);
+      updatePlantImage(plantId, plant.image);
+    } catch (error) {
+      showError("Не удалось обновить обложку растения.", error);
+    }
+  }
+
   async function createEvent(payload) {
     if (payload.type === "fertilized" && !payload.fertilizer) {
       if (state.plantDetail.plantId === payload.plantId) {
@@ -899,6 +976,7 @@ document.addEventListener("DOMContentLoaded", () => {
       state.plantDetail.photos = Array.isArray(response?.photos)
         ? response.photos
         : [];
+      state.plantDetail.coverPhotoId = response?.coverPhotoId || "";
     } catch (error) {
       showError("Не удалось загрузить фотографии.", error);
     }
@@ -921,6 +999,10 @@ document.addEventListener("DOMContentLoaded", () => {
       );
       if (created) {
         state.plantDetail.photos.unshift(created);
+        if (!state.plantDetail.coverPhotoId) {
+          state.plantDetail.coverPhotoId = created.id;
+          updatePlantImage(state.plantDetail.plantId, created.url);
+        }
         renderPlantPhotos();
       }
       dom.photoFile.value = "";
@@ -931,20 +1013,79 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function openPhotoModal(photo) {
+    const index = state.plantDetail.photos.findIndex(
+      (item) => item.id === photo.id
+    );
+    showModalPhoto(index === -1 ? 0 : index);
+    dom.photoModal.classList.add("is-active");
+    dom.photoModal.setAttribute("aria-hidden", "false");
+  }
+
+  function showModalPhoto(index) {
+    if (state.plantDetail.photos.length === 0) {
+      return;
+    }
+    const nextIndex = Math.max(
+      0,
+      Math.min(index, state.plantDetail.photos.length - 1)
+    );
+    state.modalIndex = nextIndex;
+    const photo = state.plantDetail.photos[nextIndex];
     dom.photoModalImage.src = photo.url;
     dom.photoModalDate.textContent = photo.takenAt
       ? `Дата: ${formatDate(photo.takenAt)}`
       : `Загружено: ${formatDate(
           photo.createdAt ? photo.createdAt.slice(0, 10) : ""
         )}`;
-    dom.photoModal.classList.add("is-active");
-    dom.photoModal.setAttribute("aria-hidden", "false");
+    dom.photoModalPrev.disabled = nextIndex === 0;
+    dom.photoModalNext.disabled =
+      nextIndex === state.plantDetail.photos.length - 1;
+    dom.photoModalCover.disabled =
+      photo.id === state.plantDetail.coverPhotoId;
   }
 
   function closePhotoModal() {
     dom.photoModal.classList.remove("is-active");
     dom.photoModal.setAttribute("aria-hidden", "true");
     dom.photoModalImage.src = "";
+  }
+
+  async function setCoverPhoto(photo) {
+    try {
+      await api.put(`/api/plants/${state.plantDetail.plantId}/cover`, {
+        photoId: photo.id,
+      });
+      state.plantDetail.coverPhotoId = photo.id;
+      updatePlantImage(state.plantDetail.plantId, photo.url);
+      renderPlantPhotos();
+      showModalPhoto(state.modalIndex);
+    } catch (error) {
+      showError("Не удалось установить обложку.", error);
+    }
+  }
+
+  async function deletePhoto(photo) {
+    const confirmDelete = window.confirm("Удалить фото?");
+    if (!confirmDelete) {
+      return;
+    }
+    try {
+      await api.delete(
+        `/api/plants/${state.plantDetail.plantId}/photos/${photo.id}`
+      );
+      await loadPlantPhotos(state.plantDetail.plantId);
+      await refreshPlantImage(state.plantDetail.plantId);
+      renderPlantPhotos();
+      if (state.plantDetail.photos.length === 0) {
+        closePhotoModal();
+      } else {
+        showModalPhoto(
+          Math.min(state.modalIndex, state.plantDetail.photos.length - 1)
+        );
+      }
+    } catch (error) {
+      showError("Не удалось удалить фото.", error);
+    }
   }
 
   function renderCalendar({ grid, monthLabel, monthCursor, selectedDate, events }) {

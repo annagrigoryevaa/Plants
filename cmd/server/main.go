@@ -461,10 +461,17 @@ func (a *App) handlePlantRoutes(w http.ResponseWriter, r *http.Request) {
 		case "events":
 			a.handlePlantEvents(w, r, plantID)
 			return
+		case "cover":
+			a.handlePlantCover(w, r, plantID)
+			return
 		default:
 			http.NotFound(w, r)
 			return
 		}
+	}
+	if len(parts) == 3 && parts[1] == "photos" {
+		a.handlePlantPhotoItem(w, r, plantID, parts[2])
+		return
 	}
 	http.NotFound(w, r)
 }
@@ -499,12 +506,15 @@ func (a *App) handlePlantPhotos(w http.ResponseWriter, r *http.Request, plantID 
 	case http.MethodGet:
 		ctx, cancel := a.requestContext(r)
 		defer cancel()
-		photos, err := a.listPlantPhotos(ctx, plantID)
+		photos, coverPhotoID, err := a.listPlantPhotos(ctx, plantID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string][]Photo{"photos": photos})
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"photos":       photos,
+			"coverPhotoId": coverPhotoID,
+		})
 	case http.MethodPost:
 		ctx, cancel := a.requestContext(r)
 		defer cancel()
@@ -591,10 +601,67 @@ func (a *App) handlePlantPhotos(w http.ResponseWriter, r *http.Request, plantID 
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if err := a.ensureCoverPhoto(ctx, plantID, photo.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeJSON(w, http.StatusCreated, photo)
 	default:
 		methodNotAllowed(w, r.Method, http.MethodGet, http.MethodPost)
 	}
+}
+
+func (a *App) handlePlantPhotoItem(w http.ResponseWriter, r *http.Request, plantID, photoID string) {
+	if r.Method != http.MethodDelete {
+		methodNotAllowed(w, r.Method, http.MethodDelete)
+		return
+	}
+	photoID = strings.TrimSpace(photoID)
+	if photoID == "" {
+		writeError(w, http.StatusBadRequest, "photoId обязателен")
+		return
+	}
+	ctx, cancel := a.requestContext(r)
+	defer cancel()
+	if err := a.deletePlantPhoto(ctx, plantID, photoID); err != nil {
+		if errors.Is(err, errNotFound) {
+			writeError(w, http.StatusNotFound, "фото не найдено")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *App) handlePlantCover(w http.ResponseWriter, r *http.Request, plantID string) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w, r.Method, http.MethodPut)
+		return
+	}
+	var input struct {
+		PhotoID string `json:"photoId"`
+	}
+	if err := decodeJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	input.PhotoID = strings.TrimSpace(input.PhotoID)
+	if input.PhotoID == "" {
+		writeError(w, http.StatusBadRequest, "photoId обязателен")
+		return
+	}
+	ctx, cancel := a.requestContext(r)
+	defer cancel()
+	if err := a.setCoverPhoto(ctx, plantID, input.PhotoID); err != nil {
+		if errors.Is(err, errNotFound) {
+			writeError(w, http.StatusNotFound, "фото не найдено")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *App) requestContext(r *http.Request) (context.Context, context.CancelFunc) {
@@ -634,8 +701,10 @@ func (a *App) listCatalog(ctx context.Context, limit, offset int, query string) 
 		args = append(args, "%"+query+"%")
 	}
 	sqlQuery := `SELECT p.id, p.name, p.light, p.water, p.fussiness,
-		COALESCE(ph.image_url, p.image) AS image
+		COALESCE(cp.image_url, ph.image_url, p.image) AS image
 		FROM catalog_plants p
+		LEFT JOIN plant_covers pc ON pc.plant_id = p.id
+		LEFT JOIN plant_photos cp ON cp.id = pc.photo_id
 		LEFT JOIN LATERAL (
 			SELECT image_url
 			FROM plant_photos
@@ -679,8 +748,10 @@ func (a *App) getPlant(ctx context.Context, plantID string) (Plant, error) {
 	err := a.db.QueryRowContext(
 		ctx,
 		`SELECT p.id, p.name, p.light, p.water, p.fussiness,
-			COALESCE(ph.image_url, p.image) AS image
+			COALESCE(cp.image_url, ph.image_url, p.image) AS image
 		 FROM catalog_plants p
+		 LEFT JOIN plant_covers pc ON pc.plant_id = p.id
+		 LEFT JOIN plant_photos cp ON cp.id = pc.photo_id
 		 LEFT JOIN LATERAL (
 			SELECT image_url
 			FROM plant_photos
@@ -741,9 +812,11 @@ func (a *App) listCollection(ctx context.Context) ([]string, error) {
 func (a *App) listCollectionPlants(ctx context.Context) ([]Plant, error) {
 	rows, err := a.db.QueryContext(ctx, `
 		SELECT p.id, p.name, p.light, p.water, p.fussiness,
-			COALESCE(ph.image_url, p.image) AS image
+			COALESCE(cp.image_url, ph.image_url, p.image) AS image
 		FROM catalog_plants p
 		JOIN collection c ON c.plant_id = p.id
+		LEFT JOIN plant_covers pc ON pc.plant_id = p.id
+		LEFT JOIN plant_photos cp ON cp.id = pc.photo_id
 		LEFT JOIN LATERAL (
 			SELECT image_url
 			FROM plant_photos
@@ -920,7 +993,7 @@ func (a *App) deleteEvent(ctx context.Context, eventID string) error {
 	return nil
 }
 
-func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, error) {
+func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, string, error) {
 	rows, err := a.db.QueryContext(
 		ctx,
 		`SELECT id, plant_id, image_url, taken_at, created_at
@@ -930,7 +1003,7 @@ func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, err
 		plantID,
 	)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer rows.Close()
 
@@ -940,7 +1013,7 @@ func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, err
 		var takenAt sql.NullTime
 		var createdAt time.Time
 		if err := rows.Scan(&photo.ID, &photo.PlantID, &photo.URL, &takenAt, &createdAt); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if takenAt.Valid {
 			photo.TakenAt = takenAt.Time.Format(isoDateLayout)
@@ -949,9 +1022,13 @@ func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, err
 		photos = append(photos, photo)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return photos, nil
+	coverPhotoID, err := a.getCoverPhotoID(ctx, plantID)
+	if err != nil {
+		return nil, "", err
+	}
+	return photos, coverPhotoID, nil
 }
 
 func (a *App) createPlantPhoto(ctx context.Context, plantID, url string, takenAt time.Time) (Photo, error) {
@@ -988,6 +1065,117 @@ func (a *App) createPlantPhoto(ctx context.Context, plantID, url string, takenAt
 	}
 	photo.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	return photo, nil
+}
+
+func (a *App) getCoverPhotoID(ctx context.Context, plantID string) (string, error) {
+	var photoID string
+	err := a.db.QueryRowContext(ctx, "SELECT photo_id FROM plant_covers WHERE plant_id = $1", plantID).Scan(&photoID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return photoID, nil
+}
+
+func (a *App) ensureCoverPhoto(ctx context.Context, plantID, photoID string) error {
+	_, err := a.db.ExecContext(
+		ctx,
+		`INSERT INTO plant_covers (plant_id, photo_id)
+		 VALUES ($1, $2)
+		 ON CONFLICT (plant_id) DO NOTHING`,
+		plantID,
+		photoID,
+	)
+	return err
+}
+
+func (a *App) setCoverPhoto(ctx context.Context, plantID, photoID string) error {
+	var exists bool
+	err := a.db.QueryRowContext(
+		ctx,
+		"SELECT EXISTS (SELECT 1 FROM plant_photos WHERE id = $1 AND plant_id = $2)",
+		photoID,
+		plantID,
+	).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errNotFound
+	}
+	_, err = a.db.ExecContext(
+		ctx,
+		`INSERT INTO plant_covers (plant_id, photo_id)
+		 VALUES ($1, $2)
+		 ON CONFLICT (plant_id) DO UPDATE SET photo_id = EXCLUDED.photo_id, created_at = NOW()`,
+		plantID,
+		photoID,
+	)
+	return err
+}
+
+func (a *App) deletePlantPhoto(ctx context.Context, plantID, photoID string) error {
+	var imageURL string
+	err := a.db.QueryRowContext(
+		ctx,
+		"SELECT image_url FROM plant_photos WHERE id = $1 AND plant_id = $2",
+		photoID,
+		plantID,
+	).Scan(&imageURL)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errNotFound
+		}
+		return err
+	}
+
+	result, err := a.db.ExecContext(ctx, "DELETE FROM plant_photos WHERE id = $1 AND plant_id = $2", photoID, plantID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return errNotFound
+	}
+
+	if strings.HasPrefix(imageURL, "/uploads/") {
+		filename := strings.TrimPrefix(imageURL, "/uploads/")
+		clean := filepath.Clean(filename)
+		if !strings.Contains(clean, "..") {
+			_ = os.Remove(filepath.Join(a.uploadDir, clean))
+		}
+	}
+
+	coverID, err := a.getCoverPhotoID(ctx, plantID)
+	if err != nil {
+		return err
+	}
+	if coverID == "" {
+		var latestID string
+		err = a.db.QueryRowContext(
+			ctx,
+			`SELECT id
+			 FROM plant_photos
+			 WHERE plant_id = $1
+			 ORDER BY COALESCE(taken_at, created_at) DESC, created_at DESC
+			 LIMIT 1`,
+			plantID,
+		).Scan(&latestID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if latestID != "" {
+			if err := a.setCoverPhoto(ctx, plantID, latestID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func openDB() (*sql.DB, error) {
@@ -1065,6 +1253,11 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			plant_id TEXT NOT NULL,
 			image_url TEXT NOT NULL,
 			taken_at DATE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS plant_covers (
+			plant_id TEXT PRIMARY KEY,
+			photo_id TEXT NOT NULL REFERENCES plant_photos(id) ON DELETE CASCADE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_date ON events (event_date)`,

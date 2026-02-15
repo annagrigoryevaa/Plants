@@ -236,6 +236,10 @@ p {
   color: var(--text);
 }
 
+.btn.danger {
+  color: #b91c1c;
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -404,6 +408,18 @@ p {
   font-size: 11px;
 }
 
+.photo-cover-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(47, 111, 237, 0.92);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .photo-modal {
   position: fixed;
   inset: 0;
@@ -431,6 +447,13 @@ p {
   gap: 12px;
 }
 
+.photo-modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .photo-modal-content img {
   width: 100%;
   height: auto;
@@ -455,6 +478,28 @@ p {
   font-size: 20px;
   cursor: pointer;
   box-shadow: var(--shadow-soft);
+}
+
+.photo-modal-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: var(--surface);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+}
+
+.photo-modal-nav.prev {
+  left: 12px;
+}
+
+.photo-modal-nav.next {
+  right: 12px;
 }
 
 .calendar-board,
