@@ -46,6 +46,13 @@ psql "postgres://plants:plants@localhost:5432/plants?sslmode=disable"
 Фотографии хранятся в каталоге `data/uploads` и отдаются через `/uploads/...`.
 Каталог растений использует локальные иллюстрации из `assets/catalog`.
 
+Если вы обновляетесь со старой версии (где id были строками), выполните миграцию:
+
+```bash
+psql "postgres://ВАШ_ЮЗЕР:ВАШ_ПАРОЛЬ@localhost:5432/plants?sslmode=disable" \
+  -f db/migrate_to_int_ids.sql
+```
+
 ### Переменные окружения
 
 - `PORT` — порт сервера (по умолчанию 8080).

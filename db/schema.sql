@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS catalog_plants (
-  id TEXT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
   light TEXT NOT NULL,
   water TEXT NOT NULL,
@@ -14,13 +15,13 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 
 CREATE TABLE IF NOT EXISTS collection (
-  plant_id TEXT PRIMARY KEY,
+  plant_id INTEGER PRIMARY KEY REFERENCES catalog_plants(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS events (
-  id TEXT PRIMARY KEY,
-  plant_id TEXT NOT NULL,
+  id BIGSERIAL PRIMARY KEY,
+  plant_id INTEGER NOT NULL REFERENCES catalog_plants(id) ON DELETE CASCADE,
   event_type TEXT NOT NULL CHECK (event_type IN ('watered', 'repotted', 'fertilized')),
   event_date DATE NOT NULL,
   fertilizer TEXT NOT NULL DEFAULT '',
@@ -30,16 +31,16 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE TABLE IF NOT EXISTS plant_photos (
-  id TEXT PRIMARY KEY,
-  plant_id TEXT NOT NULL,
+  id BIGSERIAL PRIMARY KEY,
+  plant_id INTEGER NOT NULL REFERENCES catalog_plants(id) ON DELETE CASCADE,
   image_url TEXT NOT NULL,
   taken_at DATE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS plant_covers (
-  plant_id TEXT PRIMARY KEY,
-  photo_id TEXT NOT NULL REFERENCES plant_photos(id) ON DELETE CASCADE,
+  plant_id INTEGER PRIMARY KEY REFERENCES catalog_plants(id) ON DELETE CASCADE,
+  photo_id BIGINT NOT NULL REFERENCES plant_photos(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -51,7 +52,7 @@ INSERT INTO profiles (id, name)
 VALUES (1, '')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO catalog_plants (id, name, light, water, fussiness, image)
+INSERT INTO catalog_plants (slug, name, light, water, fussiness, image)
 VALUES
   ('monstera', 'Монстера', 'Яркий рассеянный', '1-2 раза в неделю', 'Средняя', '/assets/catalog/monstera.svg'),
   ('sansevieria', 'Сансевиерия', 'От тени до яркого', 'Раз в 2-3 недели', 'Низкая', '/assets/catalog/sansevieria.svg'),
@@ -61,4 +62,4 @@ VALUES
   ('ficus', 'Фикус Бенджамина', 'Яркий рассеянный', '1 раз в неделю', 'Средняя', '/assets/catalog/ficus.svg'),
   ('chlorophytum', 'Хлорофитум', 'Полутень', '1 раз в неделю', 'Низкая', '/assets/catalog/chlorophytum.svg'),
   ('violet', 'Фиалка (сенполия)', 'Яркий рассеянный', 'Умеренно, теплой водой', 'Средняя', '/assets/catalog/violet.svg')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (slug) DO NOTHING;

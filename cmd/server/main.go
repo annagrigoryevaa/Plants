@@ -23,7 +23,8 @@ import (
 )
 
 type Plant struct {
-	ID        string `json:"id"`
+	ID        int64  `json:"id"`
+	Slug      string `json:"slug,omitempty"`
 	Name      string `json:"name"`
 	Light     string `json:"light"`
 	Water     string `json:"water"`
@@ -36,8 +37,8 @@ type Profile struct {
 }
 
 type Event struct {
-	ID         string `json:"id"`
-	PlantID    string `json:"plantId"`
+	ID         int64  `json:"id"`
+	PlantID    int64  `json:"plantId"`
 	Type       string `json:"type"`
 	Date       string `json:"date"`
 	Fertilizer string `json:"fertilizer"`
@@ -46,8 +47,8 @@ type Event struct {
 }
 
 type Photo struct {
-	ID        string `json:"id"`
-	PlantID   string `json:"plantId"`
+	ID        int64  `json:"id"`
+	PlantID   int64  `json:"plantId"`
 	URL       string `json:"url"`
 	TakenAt   string `json:"takenAt"`
 	CreatedAt string `json:"createdAt"`
@@ -136,6 +137,10 @@ func newApp() (*App, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := validateSchema(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := seedCatalog(ctx, db, defaultCatalog()); err != nil {
 		db.Close()
 		return nil, err
@@ -214,17 +219,17 @@ func (a *App) handleCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string][]string{"collection": collection})
+		writeJSON(w, http.StatusOK, map[string][]int64{"collection": collection})
 	case http.MethodPost:
 		var input struct {
-			PlantID string `json:"plantId"`
+			PlantID int64 `json:"plantId"`
 		}
 		if err := decodeJSON(w, r, &input); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		plantID := strings.TrimSpace(input.PlantID)
-		if plantID == "" {
+		plantID := input.PlantID
+		if plantID <= 0 {
 			writeError(w, http.StatusBadRequest, "plantId обязателен")
 			return
 		}
@@ -243,7 +248,7 @@ func (a *App) handleCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string][]string{"collection": collection})
+		writeJSON(w, http.StatusOK, map[string][]int64{"collection": collection})
 	default:
 		methodNotAllowed(w, r.Method, http.MethodGet, http.MethodPost)
 	}
@@ -277,10 +282,9 @@ func (a *App) handleCollectionItem(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, r.Method, http.MethodDelete)
 		return
 	}
-	plantID := strings.TrimPrefix(r.URL.Path, "/api/collection/")
-	plantID = strings.TrimSpace(plantID)
-	if plantID == "" {
-		writeError(w, http.StatusBadRequest, "plantId обязателен")
+	plantID, err := parseID(strings.TrimPrefix(r.URL.Path, "/api/collection/"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "некорректный plantId")
 		return
 	}
 	ctx, cancel := a.requestContext(r)
@@ -294,7 +298,7 @@ func (a *App) handleCollectionItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string][]string{"collection": collection})
+	writeJSON(w, http.StatusOK, map[string][]int64{"collection": collection})
 }
 
 func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -324,7 +328,7 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string][]Event{"events": events})
 	case http.MethodPost:
 		var input struct {
-			PlantID    string `json:"plantId"`
+			PlantID    int64  `json:"plantId"`
 			Type       string `json:"type"`
 			Date       string `json:"date"`
 			Fertilizer string `json:"fertilizer"`
@@ -335,13 +339,12 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		input.PlantID = strings.TrimSpace(input.PlantID)
 		input.Type = strings.TrimSpace(input.Type)
 		input.Date = strings.TrimSpace(input.Date)
 		input.Fertilizer = strings.TrimSpace(input.Fertilizer)
 		input.Notes = strings.TrimSpace(input.Notes)
 
-		if input.PlantID == "" {
+		if input.PlantID <= 0 {
 			writeError(w, http.StatusBadRequest, "plantId обязателен")
 			return
 		}
@@ -402,10 +405,9 @@ func (a *App) handleEventItem(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, r.Method, http.MethodDelete)
 		return
 	}
-	eventID := strings.TrimPrefix(r.URL.Path, "/api/events/")
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		writeError(w, http.StatusBadRequest, "id обязателен")
+	eventID, err := parseID(strings.TrimPrefix(r.URL.Path, "/api/events/"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "некорректный id")
 		return
 	}
 	ctx, cancel := a.requestContext(r)
@@ -429,9 +431,9 @@ func (a *App) handlePlantRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(path, "/")
-	plantID := strings.TrimSpace(parts[0])
-	if plantID == "" {
-		writeError(w, http.StatusBadRequest, "plantId обязателен")
+	plantID, err := parseID(parts[0])
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "некорректный plantId")
 		return
 	}
 	if len(parts) == 1 {
@@ -476,7 +478,7 @@ func (a *App) handlePlantRoutes(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func (a *App) handlePlantEvents(w http.ResponseWriter, r *http.Request, plantID string) {
+func (a *App) handlePlantEvents(w http.ResponseWriter, r *http.Request, plantID int64) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, r.Method, http.MethodGet)
 		return
@@ -501,7 +503,7 @@ func (a *App) handlePlantEvents(w http.ResponseWriter, r *http.Request, plantID 
 	writeJSON(w, http.StatusOK, map[string][]Event{"events": events})
 }
 
-func (a *App) handlePlantPhotos(w http.ResponseWriter, r *http.Request, plantID string) {
+func (a *App) handlePlantPhotos(w http.ResponseWriter, r *http.Request, plantID int64) {
 	switch r.Method {
 	case http.MethodGet:
 		ctx, cancel := a.requestContext(r)
@@ -611,19 +613,19 @@ func (a *App) handlePlantPhotos(w http.ResponseWriter, r *http.Request, plantID 
 	}
 }
 
-func (a *App) handlePlantPhotoItem(w http.ResponseWriter, r *http.Request, plantID, photoID string) {
+func (a *App) handlePlantPhotoItem(w http.ResponseWriter, r *http.Request, plantID int64, photoID string) {
 	if r.Method != http.MethodDelete {
 		methodNotAllowed(w, r.Method, http.MethodDelete)
 		return
 	}
-	photoID = strings.TrimSpace(photoID)
-	if photoID == "" {
-		writeError(w, http.StatusBadRequest, "photoId обязателен")
+	photoIDInt, err := parseID(photoID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "некорректный photoId")
 		return
 	}
 	ctx, cancel := a.requestContext(r)
 	defer cancel()
-	if err := a.deletePlantPhoto(ctx, plantID, photoID); err != nil {
+	if err := a.deletePlantPhoto(ctx, plantID, photoIDInt); err != nil {
 		if errors.Is(err, errNotFound) {
 			writeError(w, http.StatusNotFound, "фото не найдено")
 			return
@@ -634,20 +636,19 @@ func (a *App) handlePlantPhotoItem(w http.ResponseWriter, r *http.Request, plant
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *App) handlePlantCover(w http.ResponseWriter, r *http.Request, plantID string) {
+func (a *App) handlePlantCover(w http.ResponseWriter, r *http.Request, plantID int64) {
 	if r.Method != http.MethodPut {
 		methodNotAllowed(w, r.Method, http.MethodPut)
 		return
 	}
 	var input struct {
-		PhotoID string `json:"photoId"`
+		PhotoID int64 `json:"photoId"`
 	}
 	if err := decodeJSON(w, r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	input.PhotoID = strings.TrimSpace(input.PhotoID)
-	if input.PhotoID == "" {
+	if input.PhotoID <= 0 {
 		writeError(w, http.StatusBadRequest, "photoId обязателен")
 		return
 	}
@@ -697,7 +698,7 @@ func (a *App) listCatalog(ctx context.Context, limit, offset int, query string) 
 	args := []interface{}{}
 	filters := []string{}
 	if query != "" {
-		filters = append(filters, fmt.Sprintf("p.name ILIKE $%d", len(args)+1))
+		filters = append(filters, fmt.Sprintf("name ILIKE $%d", len(args)+1))
 		args = append(args, "%"+query+"%")
 	}
 	sqlQuery := `SELECT id, name, light, water, fussiness, image
@@ -733,7 +734,7 @@ func (a *App) listCatalog(ctx context.Context, limit, offset int, query string) 
 	return plants, hasMore, nil
 }
 
-func (a *App) getPlant(ctx context.Context, plantID string) (Plant, error) {
+func (a *App) getPlant(ctx context.Context, plantID int64) (Plant, error) {
 	var plant Plant
 	err := a.db.QueryRowContext(
 		ctx,
@@ -751,7 +752,7 @@ func (a *App) getPlant(ctx context.Context, plantID string) (Plant, error) {
 	return plant, nil
 }
 
-func (a *App) plantExists(ctx context.Context, plantID string) error {
+func (a *App) plantExists(ctx context.Context, plantID int64) error {
 	var exists bool
 	err := a.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM catalog_plants WHERE id = $1)", plantID).Scan(&exists)
 	if err != nil {
@@ -763,7 +764,7 @@ func (a *App) plantExists(ctx context.Context, plantID string) error {
 	return nil
 }
 
-func (a *App) listCollection(ctx context.Context) ([]string, error) {
+func (a *App) listCollection(ctx context.Context) ([]int64, error) {
 	rows, err := a.db.QueryContext(ctx, `
 		SELECT c.plant_id
 		FROM collection c
@@ -775,9 +776,9 @@ func (a *App) listCollection(ctx context.Context) ([]string, error) {
 	}
 	defer rows.Close()
 
-	collection := make([]string, 0)
+	collection := make([]int64, 0)
 	for rows.Next() {
-		var plantID string
+		var plantID int64
 		if err := rows.Scan(&plantID); err != nil {
 			return nil, err
 		}
@@ -825,14 +826,14 @@ func (a *App) listCollectionPlants(ctx context.Context) ([]Plant, error) {
 	return plants, nil
 }
 
-func (a *App) addToCollection(ctx context.Context, plantID string) ([]string, error) {
+func (a *App) addToCollection(ctx context.Context, plantID int64) ([]int64, error) {
 	if _, err := a.db.ExecContext(ctx, "INSERT INTO collection (plant_id) VALUES ($1) ON CONFLICT DO NOTHING", plantID); err != nil {
 		return nil, err
 	}
 	return a.listCollection(ctx)
 }
 
-func (a *App) removeFromCollection(ctx context.Context, plantID string) ([]string, error) {
+func (a *App) removeFromCollection(ctx context.Context, plantID int64) ([]int64, error) {
 	result, err := a.db.ExecContext(ctx, "DELETE FROM collection WHERE plant_id = $1", plantID)
 	if err != nil {
 		return nil, err
@@ -847,7 +848,7 @@ func (a *App) removeFromCollection(ctx context.Context, plantID string) ([]strin
 	return a.listCollection(ctx)
 }
 
-func (a *App) isInCollection(ctx context.Context, plantID string) (bool, error) {
+func (a *App) isInCollection(ctx context.Context, plantID int64) (bool, error) {
 	var exists bool
 	err := a.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM collection WHERE plant_id = $1)", plantID).Scan(&exists)
 	if err != nil {
@@ -891,7 +892,7 @@ func (a *App) listEvents(ctx context.Context, monthStart, monthEnd time.Time) ([
 	return events, nil
 }
 
-func (a *App) listPlantEvents(ctx context.Context, plantID string, monthStart, monthEnd time.Time) ([]Event, error) {
+func (a *App) listPlantEvents(ctx context.Context, plantID int64, monthStart, monthEnd time.Time) ([]Event, error) {
 	query := "SELECT id, plant_id, event_type, event_date, fertilizer, notes, created_at FROM events WHERE plant_id = $1"
 	args := []interface{}{plantID}
 	if !monthStart.IsZero() && !monthEnd.IsZero() {
@@ -926,39 +927,34 @@ func (a *App) listPlantEvents(ctx context.Context, plantID string, monthStart, m
 	return events, nil
 }
 
-func (a *App) createEvent(ctx context.Context, plantID, eventType string, eventDate time.Time, fertilizer, notes string) (Event, error) {
-	event := Event{
-		ID:         newID(),
-		PlantID:    plantID,
-		Type:       eventType,
-		Date:       eventDate.Format(isoDateLayout),
-		Fertilizer: fertilizer,
-		Notes:      notes,
-		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
-	}
-	createdAt, err := time.Parse(time.RFC3339, event.CreatedAt)
-	if err != nil {
-		createdAt = time.Now().UTC()
-		event.CreatedAt = createdAt.Format(time.RFC3339)
-	}
-	_, err = a.db.ExecContext(
+func (a *App) createEvent(ctx context.Context, plantID int64, eventType string, eventDate time.Time, fertilizer, notes string) (Event, error) {
+	var event Event
+	event.PlantID = plantID
+	event.Type = eventType
+	event.Date = eventDate.Format(isoDateLayout)
+	event.Fertilizer = fertilizer
+	event.Notes = notes
+
+	var createdAt time.Time
+	err := a.db.QueryRowContext(
 		ctx,
-		"INSERT INTO events (id, plant_id, event_type, event_date, fertilizer, notes, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-		event.ID,
-		event.PlantID,
-		event.Type,
+		`INSERT INTO events (plant_id, event_type, event_date, fertilizer, notes)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id, created_at`,
+		plantID,
+		eventType,
 		eventDate,
-		event.Fertilizer,
-		event.Notes,
-		createdAt,
-	)
+		fertilizer,
+		notes,
+	).Scan(&event.ID, &createdAt)
 	if err != nil {
 		return Event{}, err
 	}
+	event.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	return event, nil
 }
 
-func (a *App) deleteEvent(ctx context.Context, eventID string) error {
+func (a *App) deleteEvent(ctx context.Context, eventID int64) error {
 	result, err := a.db.ExecContext(ctx, "DELETE FROM events WHERE id = $1", eventID)
 	if err != nil {
 		return err
@@ -973,7 +969,7 @@ func (a *App) deleteEvent(ctx context.Context, eventID string) error {
 	return nil
 }
 
-func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, string, error) {
+func (a *App) listPlantPhotos(ctx context.Context, plantID int64) ([]Photo, int64, error) {
 	rows, err := a.db.QueryContext(
 		ctx,
 		`SELECT id, plant_id, image_url, taken_at, created_at
@@ -983,7 +979,7 @@ func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, str
 		plantID,
 	)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -993,7 +989,7 @@ func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, str
 		var takenAt sql.NullTime
 		var createdAt time.Time
 		if err := rows.Scan(&photo.ID, &photo.PlantID, &photo.URL, &takenAt, &createdAt); err != nil {
-			return nil, "", err
+			return nil, 0, err
 		}
 		if takenAt.Valid {
 			photo.TakenAt = takenAt.Time.Format(isoDateLayout)
@@ -1002,18 +998,17 @@ func (a *App) listPlantPhotos(ctx context.Context, plantID string) ([]Photo, str
 		photos = append(photos, photo)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, "", err
+		return nil, 0, err
 	}
 	coverPhotoID, err := a.getCoverPhotoID(ctx, plantID)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, err
 	}
 	return photos, coverPhotoID, nil
 }
 
-func (a *App) createPlantPhoto(ctx context.Context, plantID, url string, takenAt time.Time) (Photo, error) {
+func (a *App) createPlantPhoto(ctx context.Context, plantID int64, url string, takenAt time.Time) (Photo, error) {
 	photo := Photo{
-		ID:      newID(),
 		PlantID: plantID,
 		URL:     url,
 	}
@@ -1021,23 +1016,21 @@ func (a *App) createPlantPhoto(ctx context.Context, plantID, url string, takenAt
 	if takenAt.IsZero() {
 		err := a.db.QueryRowContext(
 			ctx,
-			"INSERT INTO plant_photos (id, plant_id, image_url) VALUES ($1, $2, $3) RETURNING created_at",
-			photo.ID,
+			"INSERT INTO plant_photos (plant_id, image_url) VALUES ($1, $2) RETURNING id, created_at",
 			photo.PlantID,
 			photo.URL,
-		).Scan(&createdAt)
+		).Scan(&photo.ID, &createdAt)
 		if err != nil {
 			return Photo{}, err
 		}
 	} else {
 		err := a.db.QueryRowContext(
 			ctx,
-			"INSERT INTO plant_photos (id, plant_id, image_url, taken_at) VALUES ($1, $2, $3, $4) RETURNING taken_at, created_at",
-			photo.ID,
+			"INSERT INTO plant_photos (plant_id, image_url, taken_at) VALUES ($1, $2, $3) RETURNING id, taken_at, created_at",
 			photo.PlantID,
 			photo.URL,
 			takenAt,
-		).Scan(&takenAt, &createdAt)
+		).Scan(&photo.ID, &takenAt, &createdAt)
 		if err != nil {
 			return Photo{}, err
 		}
@@ -1047,19 +1040,19 @@ func (a *App) createPlantPhoto(ctx context.Context, plantID, url string, takenAt
 	return photo, nil
 }
 
-func (a *App) getCoverPhotoID(ctx context.Context, plantID string) (string, error) {
-	var photoID string
+func (a *App) getCoverPhotoID(ctx context.Context, plantID int64) (int64, error) {
+	var photoID int64
 	err := a.db.QueryRowContext(ctx, "SELECT photo_id FROM plant_covers WHERE plant_id = $1", plantID).Scan(&photoID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", nil
+			return 0, nil
 		}
-		return "", err
+		return 0, err
 	}
 	return photoID, nil
 }
 
-func (a *App) ensureCoverPhoto(ctx context.Context, plantID, photoID string) error {
+func (a *App) ensureCoverPhoto(ctx context.Context, plantID, photoID int64) error {
 	_, err := a.db.ExecContext(
 		ctx,
 		`INSERT INTO plant_covers (plant_id, photo_id)
@@ -1071,7 +1064,7 @@ func (a *App) ensureCoverPhoto(ctx context.Context, plantID, photoID string) err
 	return err
 }
 
-func (a *App) setCoverPhoto(ctx context.Context, plantID, photoID string) error {
+func (a *App) setCoverPhoto(ctx context.Context, plantID, photoID int64) error {
 	var exists bool
 	err := a.db.QueryRowContext(
 		ctx,
@@ -1096,7 +1089,7 @@ func (a *App) setCoverPhoto(ctx context.Context, plantID, photoID string) error 
 	return err
 }
 
-func (a *App) deletePlantPhoto(ctx context.Context, plantID, photoID string) error {
+func (a *App) deletePlantPhoto(ctx context.Context, plantID, photoID int64) error {
 	var imageURL string
 	err := a.db.QueryRowContext(
 		ctx,
@@ -1135,8 +1128,8 @@ func (a *App) deletePlantPhoto(ctx context.Context, plantID, photoID string) err
 	if err != nil {
 		return err
 	}
-	if coverID == "" {
-		var latestID string
+	if coverID == 0 {
+		var latestID int64
 		err = a.db.QueryRowContext(
 			ctx,
 			`SELECT id
@@ -1149,7 +1142,7 @@ func (a *App) deletePlantPhoto(ctx context.Context, plantID, photoID string) err
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if latestID != "" {
+		if latestID != 0 {
 			if err := a.setCoverPhoto(ctx, plantID, latestID); err != nil {
 				return err
 			}
@@ -1202,7 +1195,8 @@ func getDatabaseURL() string {
 func ensureSchema(ctx context.Context, db *sql.DB) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS catalog_plants (
-			id TEXT PRIMARY KEY,
+			id SERIAL PRIMARY KEY,
+			slug TEXT NOT NULL UNIQUE,
 			name TEXT NOT NULL,
 			light TEXT NOT NULL,
 			water TEXT NOT NULL,
@@ -1215,12 +1209,12 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			name TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS collection (
-			plant_id TEXT PRIMARY KEY,
+			plant_id INTEGER PRIMARY KEY REFERENCES catalog_plants(id) ON DELETE CASCADE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE TABLE IF NOT EXISTS events (
-			id TEXT PRIMARY KEY,
-			plant_id TEXT NOT NULL,
+			id BIGSERIAL PRIMARY KEY,
+			plant_id INTEGER NOT NULL REFERENCES catalog_plants(id) ON DELETE CASCADE,
 			event_type TEXT NOT NULL CHECK (event_type IN ('watered', 'repotted', 'fertilized')),
 			event_date DATE NOT NULL,
 			fertilizer TEXT NOT NULL DEFAULT '',
@@ -1229,15 +1223,15 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			CHECK ((event_type != 'fertilized') OR (length(trim(fertilizer)) > 0))
 		)`,
 		`CREATE TABLE IF NOT EXISTS plant_photos (
-			id TEXT PRIMARY KEY,
-			plant_id TEXT NOT NULL,
+			id BIGSERIAL PRIMARY KEY,
+			plant_id INTEGER NOT NULL REFERENCES catalog_plants(id) ON DELETE CASCADE,
 			image_url TEXT NOT NULL,
 			taken_at DATE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE TABLE IF NOT EXISTS plant_covers (
-			plant_id TEXT PRIMARY KEY,
-			photo_id TEXT NOT NULL REFERENCES plant_photos(id) ON DELETE CASCADE,
+			plant_id INTEGER PRIMARY KEY REFERENCES catalog_plants(id) ON DELETE CASCADE,
+			photo_id BIGINT NOT NULL REFERENCES plant_photos(id) ON DELETE CASCADE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_date ON events (event_date)`,
@@ -1253,13 +1247,51 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+func validateSchema(ctx context.Context, db *sql.DB) error {
+	if err := requireColumnType(ctx, db, "catalog_plants", "id", "integer"); err != nil {
+		return err
+	}
+	if err := requireColumnType(ctx, db, "catalog_plants", "slug", "text"); err != nil {
+		return err
+	}
+	if err := requireColumnType(ctx, db, "collection", "plant_id", "integer"); err != nil {
+		return err
+	}
+	if err := requireColumnType(ctx, db, "events", "id", "bigint"); err != nil {
+		return err
+	}
+	if err := requireColumnType(ctx, db, "plant_photos", "id", "bigint"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func requireColumnType(ctx context.Context, db *sql.DB, table, column, expected string) error {
+	var dataType string
+	err := db.QueryRowContext(
+		ctx,
+		`SELECT data_type
+		 FROM information_schema.columns
+		 WHERE table_name = $1 AND column_name = $2`,
+		table,
+		column,
+	).Scan(&dataType)
+	if err != nil {
+		return err
+	}
+	if dataType != expected {
+		return fmt.Errorf("schema mismatch for %s.%s; run db/migrate_to_int_ids.sql", table, column)
+	}
+	return nil
+}
+
 func seedCatalog(ctx context.Context, db *sql.DB, plants []Plant) error {
 	for _, plant := range plants {
 		_, err := db.ExecContext(
 			ctx,
-			`INSERT INTO catalog_plants (id, name, light, water, fussiness, image)
+			`INSERT INTO catalog_plants (slug, name, light, water, fussiness, image)
 			 VALUES ($1, $2, $3, $4, $5, $6)
-			 ON CONFLICT (id) DO UPDATE SET
+			 ON CONFLICT (slug) DO UPDATE SET
 				name = EXCLUDED.name,
 				light = EXCLUDED.light,
 				water = EXCLUDED.water,
@@ -1268,7 +1300,7 @@ func seedCatalog(ctx context.Context, db *sql.DB, plants []Plant) error {
 			 WHERE catalog_plants.image IS NULL
 			    OR catalog_plants.image = ''
 			    OR catalog_plants.image ILIKE '%unsplash.com%'`,
-			plant.ID,
+			plant.Slug,
 			plant.Name,
 			plant.Light,
 			plant.Water,
@@ -1294,7 +1326,7 @@ func monthRange(month string) (time.Time, time.Time, error) {
 func defaultCatalog() []Plant {
 	return []Plant{
 		{
-			ID:        "monstera",
+			Slug:      "monstera",
 			Name:      "Монстера",
 			Light:     "Яркий рассеянный",
 			Water:     "1-2 раза в неделю",
@@ -1302,7 +1334,7 @@ func defaultCatalog() []Plant {
 			Image:     "/assets/catalog/monstera.svg",
 		},
 		{
-			ID:        "sansevieria",
+			Slug:      "sansevieria",
 			Name:      "Сансевиерия",
 			Light:     "От тени до яркого",
 			Water:     "Раз в 2-3 недели",
@@ -1310,7 +1342,7 @@ func defaultCatalog() []Plant {
 			Image:     "/assets/catalog/sansevieria.svg",
 		},
 		{
-			ID:        "spathiphyllum",
+			Slug:      "spathiphyllum",
 			Name:      "Спатифиллум",
 			Light:     "Полутень",
 			Water:     "Регулярно, не пересушивать",
@@ -1318,7 +1350,7 @@ func defaultCatalog() []Plant {
 			Image:     "/assets/catalog/spathiphyllum.svg",
 		},
 		{
-			ID:        "zamioculcas",
+			Slug:      "zamioculcas",
 			Name:      "Замиокулькас",
 			Light:     "Полутень",
 			Water:     "Раз в 2-3 недели",
@@ -1326,7 +1358,7 @@ func defaultCatalog() []Plant {
 			Image:     "/assets/catalog/zamioculcas.svg",
 		},
 		{
-			ID:        "calathea",
+			Slug:      "calathea",
 			Name:      "Калатея",
 			Light:     "Яркий рассеянный",
 			Water:     "Часто, мягкая вода",
@@ -1334,7 +1366,7 @@ func defaultCatalog() []Plant {
 			Image:     "/assets/catalog/calathea.svg",
 		},
 		{
-			ID:        "ficus",
+			Slug:      "ficus",
 			Name:      "Фикус Бенджамина",
 			Light:     "Яркий рассеянный",
 			Water:     "1 раз в неделю",
@@ -1342,7 +1374,7 @@ func defaultCatalog() []Plant {
 			Image:     "/assets/catalog/ficus.svg",
 		},
 		{
-			ID:        "chlorophytum",
+			Slug:      "chlorophytum",
 			Name:      "Хлорофитум",
 			Light:     "Полутень",
 			Water:     "1 раз в неделю",
@@ -1350,7 +1382,7 @@ func defaultCatalog() []Plant {
 			Image:     "/assets/catalog/chlorophytum.svg",
 		},
 		{
-			ID:        "violet",
+			Slug:      "violet",
 			Name:      "Фиалка (сенполия)",
 			Light:     "Яркий рассеянный",
 			Water:     "Умеренно, теплой водой",
@@ -1407,6 +1439,18 @@ func getenv(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func parseID(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, errors.New("id is empty")
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0, errors.New("id is invalid")
+	}
+	return parsed, nil
 }
 
 func isAllowedImageExt(ext string) bool {

@@ -153,7 +153,7 @@ document.addEventListener("DOMContentLoaded", () => {
       plantId: null,
       plant: null,
       photos: [],
-      coverPhotoId: "",
+      coverPhotoId: 0,
       monthCursor: new Date(),
       selectedDate: toISODate(new Date()),
     },
@@ -188,7 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!button) {
       return;
     }
-    const plantId = button.dataset.id;
+    const plantId = Number(button.dataset.id);
     if (button.dataset.action === "add") {
       addPlantToCollection(plantId);
     }
@@ -202,7 +202,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!button) {
       return;
     }
-    const plantId = button.dataset.id;
+    const plantId = Number(button.dataset.id);
     if (button.dataset.action === "open") {
       openPlantDetail(plantId);
     }
@@ -213,7 +213,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!button) {
       return;
     }
-    const plantId = button.dataset.id;
+    const plantId = Number(button.dataset.id);
     if (button.dataset.action === "remove") {
       removePlantFromCollection(plantId);
     }
@@ -245,7 +245,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     createEvent({
-      plantId: dom.eventPlant.value,
+      plantId: Number(dom.eventPlant.value),
       type: dom.eventType.value,
       date: dom.eventDate.value || toISODate(new Date()),
       fertilizer: dom.eventFertilizer.value.trim(),
@@ -258,7 +258,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!button) {
       return;
     }
-    deleteEvent(button.dataset.id);
+    deleteEvent(Number(button.dataset.id));
   });
 
   dom.calendarGrid.addEventListener("click", (event) => {
@@ -311,7 +311,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!button) {
       return;
     }
-    deleteEvent(button.dataset.id);
+    deleteEvent(Number(button.dataset.id));
   });
 
   dom.plantCalendarGrid.addEventListener("click", (event) => {
@@ -429,12 +429,14 @@ document.addEventListener("DOMContentLoaded", () => {
           ? profileData
           : { name: "" };
       state.collection = Array.isArray(collectionData?.collection)
-        ? collectionData.collection
+        ? collectionData.collection.map(Number)
         : [];
       state.collectionPlants = Array.isArray(collectionPlantsData?.plants)
-        ? collectionPlantsData.plants
+        ? collectionPlantsData.plants.map(normalizePlant)
         : [];
-      state.events = Array.isArray(eventsData?.events) ? eventsData.events : [];
+      state.events = Array.isArray(eventsData?.events)
+        ? eventsData.events.map(normalizeEvent)
+        : [];
       state.collectionPlants.forEach((plant) =>
         plantIndex.set(plant.id, plant)
       );
@@ -584,7 +586,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderPlantOptions() {
-    const currentValue = dom.eventPlant.value;
+    const currentValue = Number(dom.eventPlant.value);
     dom.eventPlant.innerHTML = "";
     const plants = [...state.collectionPlants].sort((a, b) =>
       a.name.localeCompare(b.name, "ru")
@@ -598,12 +600,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     plants.forEach((plant) => {
       const option = document.createElement("option");
-      option.value = plant.id;
+      option.value = `${plant.id}`;
       option.textContent = plant.name;
       dom.eventPlant.appendChild(option);
     });
     if (plants.some((plant) => plant.id === currentValue)) {
-      dom.eventPlant.value = currentValue;
+      dom.eventPlant.value = `${currentValue}`;
     }
   }
 
@@ -768,7 +770,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const response = await api.post("/api/collection", { plantId: id });
       if (Array.isArray(response?.collection)) {
-        state.collection = response.collection;
+        state.collection = response.collection.map(Number);
       }
       await refreshCollectionPlants();
     } catch (error) {
@@ -780,7 +782,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const response = await api.delete(`/api/collection/${id}`);
       if (Array.isArray(response?.collection)) {
-        state.collection = response.collection;
+        state.collection = response.collection.map(Number);
       } else {
         state.collection = state.collection.filter((item) => item !== id);
       }
@@ -797,7 +799,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const collectionPlantsData = await api.get("/api/collection/plants");
       state.collectionPlants = Array.isArray(collectionPlantsData?.plants)
-        ? collectionPlantsData.plants
+        ? collectionPlantsData.plants.map(normalizePlant)
         : [];
       state.collectionPlants.forEach((plant) =>
         plantIndex.set(plant.id, plant)
@@ -871,7 +873,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const created = await api.post("/api/events", payload);
       if (created) {
-        state.events.unshift(created);
+        state.events.unshift(normalizeEvent(created));
       }
       const [year, month] = payload.date.split("-").map(Number);
       if (Number.isFinite(year) && Number.isFinite(month)) {
@@ -947,7 +949,9 @@ document.addEventListener("DOMContentLoaded", () => {
         params.set("q", state.catalogQuery.trim());
       }
       const response = await api.get(`/api/catalog?${params.toString()}`);
-      const items = Array.isArray(response?.items) ? response.items : [];
+      const items = Array.isArray(response?.items)
+        ? response.items.map(normalizePlant)
+        : [];
       state.catalog = reset ? items : [...state.catalog, ...items];
       state.catalogOffset = response?.nextOffset ?? state.catalog.length;
       state.catalogHasMore = Boolean(response?.hasMore);
@@ -988,9 +992,9 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const response = await api.get(`/api/plants/${plantId}/photos`);
       state.plantDetail.photos = Array.isArray(response?.photos)
-        ? response.photos
+        ? response.photos.map(normalizePhoto)
         : [];
-      state.plantDetail.coverPhotoId = response?.coverPhotoId || "";
+      state.plantDetail.coverPhotoId = Number(response?.coverPhotoId) || 0;
       await refreshPlantImage(plantId);
     } catch (error) {
       showError("Не удалось загрузить фотографии.", error);
@@ -1013,10 +1017,11 @@ document.addEventListener("DOMContentLoaded", () => {
         formData
       );
       if (created) {
-        state.plantDetail.photos.unshift(created);
+        const normalized = normalizePhoto(created);
+        state.plantDetail.photos.unshift(normalized);
         if (!state.plantDetail.coverPhotoId) {
-          state.plantDetail.coverPhotoId = created.id;
-          updatePlantImage(state.plantDetail.plantId, created.url);
+          state.plantDetail.coverPhotoId = normalized.id;
+          updatePlantImage(state.plantDetail.plantId, normalized.url);
         }
         renderPlantPhotos();
       }
@@ -1231,7 +1236,7 @@ function createActionButton(label, style, action, id) {
   button.className = `btn ${style}`;
   button.textContent = label;
   button.dataset.action = action;
-  button.dataset.id = id;
+  button.dataset.id = `${id}`;
   return button;
 }
 
@@ -1299,6 +1304,29 @@ function filterEventsByMonth(events, cursor) {
       }
       return b.date.localeCompare(a.date);
     });
+}
+
+function normalizePlant(plant) {
+  return {
+    ...plant,
+    id: Number(plant.id),
+  };
+}
+
+function normalizeEvent(event) {
+  return {
+    ...event,
+    id: Number(event.id),
+    plantId: Number(event.plantId),
+  };
+}
+
+function normalizePhoto(photo) {
+  return {
+    ...photo,
+    id: Number(photo.id),
+    plantId: Number(photo.plantId),
+  };
 }
 
 function toggleEmpty(element, show) {
