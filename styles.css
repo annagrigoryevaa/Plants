@@ -1,17 +1,17 @@
 :root {
-  --bg: #f6f7f9;
+  --bg: #f6f1f0;
   --surface: #ffffff;
-  --surface-alt: #f9fafb;
-  --text: #1f2933;
-  --muted: #6b7280;
-  --primary: #2f6fed;
-  --primary-dark: #2357c6;
-  --border: #e5e7eb;
-  --shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-  --shadow-soft: 0 6px 18px rgba(15, 23, 42, 0.06);
-  --water: #3b82f6;
-  --repot: #f59e0b;
-  --fert: #8b5cf6;
+  --surface-alt: #fcf8f7;
+  --text: #1f1b1c;
+  --muted: #7a6c70;
+  --primary: #d4a4b1;
+  --primary-dark: #b88592;
+  --border: #ece2e5;
+  --shadow: 0 14px 32px rgba(40, 24, 28, 0.08);
+  --shadow-soft: 0 8px 22px rgba(40, 24, 28, 0.06);
+  --water: #7aa7d6;
+  --repot: #d6a07a;
+  --fert: #a48bd4;
 }
 
 * {
@@ -20,8 +20,8 @@
 
 body {
   margin: 0;
-  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  background: var(--bg);
+  font-family: "Manrope", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: linear-gradient(180deg, #f8f4f2 0%, #f4efee 100%);
   color: var(--text);
 }
 
@@ -31,7 +31,7 @@ img {
 }
 
 .app {
-  max-width: 1240px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 28px;
 }
@@ -42,9 +42,9 @@ img {
   justify-content: space-between;
   gap: 16px;
   align-items: center;
-  margin-bottom: 28px;
-  padding: 16px 18px;
-  border-radius: 18px;
+  margin-bottom: 32px;
+  padding: 18px 22px;
+  border-radius: 24px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
   border: 1px solid var(--border);
@@ -57,10 +57,10 @@ img {
 }
 
 .logo {
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
-  background: var(--primary);
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #d8a7b2 0%, #f1cdd6 100%);
   display: grid;
   place-items: center;
   font-size: 22px;
@@ -70,14 +70,15 @@ img {
 
 h1 {
   margin: 0 0 6px;
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 700;
+  letter-spacing: 0.4px;
 }
 
 h2 {
   margin: 0 0 6px;
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 600;
 }
 
 h3 {
@@ -98,20 +99,21 @@ p {
 }
 
 .tab {
-  border: 1px solid transparent;
-  background: transparent;
-  padding: 8px 12px;
-  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 8px 14px;
+  border-radius: 999px;
   font-weight: 600;
   color: var(--muted);
   cursor: pointer;
   transition: 0.2s ease;
+  box-shadow: var(--shadow-soft);
 }
 
 .tab.is-active {
-  color: var(--text);
-  background: var(--surface-alt);
-  border-color: var(--border);
+  color: #fff;
+  background: var(--primary-dark);
+  border-color: transparent;
 }
 
 .view {
@@ -138,11 +140,11 @@ p {
 }
 
 .search input {
-  padding: 9px 14px;
-  border-radius: 10px;
+  padding: 10px 16px;
+  border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface);
-  min-width: 220px;
+  min-width: 240px;
 }
 
 .catalog-grid,
@@ -161,7 +163,7 @@ p {
 
 .plant-card {
   background: var(--surface);
-  border-radius: 16px;
+  border-radius: 20px;
   border: 1px solid var(--border);
   overflow: hidden;
   box-shadow: var(--shadow);
@@ -176,7 +178,7 @@ p {
 }
 
 .plant-photo {
-  height: 176px;
+  height: 180px;
   object-fit: cover;
   width: 100%;
 }
@@ -211,18 +213,19 @@ p {
 
 .btn {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 14px;
+  border-radius: 999px;
+  padding: 10px 18px;
   background: var(--surface);
   color: var(--text);
   font-weight: 600;
   cursor: pointer;
   transition: 0.2s ease;
+  letter-spacing: 0.2px;
 }
 
 .btn.primary {
-  background: var(--primary);
-  border-color: var(--primary);
+  background: var(--primary-dark);
+  border-color: var(--primary-dark);
   color: #fff;
 }
 
@@ -253,8 +256,8 @@ p {
 
 .profile-card {
   background: var(--surface);
-  border-radius: 16px;
-  padding: 20px;
+  border-radius: 20px;
+  padding: 22px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   display: flex;
@@ -285,8 +288,8 @@ p {
 
 .collection-panel {
   background: var(--surface);
-  border-radius: 16px;
-  padding: 20px;
+  border-radius: 20px;
+  padding: 22px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   display: flex;
@@ -505,8 +508,8 @@ p {
 .calendar-board,
 .calendar-side {
   background: var(--surface);
-  border-radius: 16px;
-  padding: 20px;
+  border-radius: 20px;
+  padding: 22px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
 }
@@ -542,7 +545,7 @@ p {
 }
 
 .calendar-cell {
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--surface-alt);
   padding: 8px;
@@ -564,7 +567,7 @@ p {
 }
 
 .calendar-cell.is-selected {
-  background: #eaf1ff;
+  background: #f1e8eb;
   border-color: var(--primary);
 }
 
@@ -691,7 +694,7 @@ p {
 
 .event-item {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 12px;
   margin-bottom: 12px;
   background: var(--surface-alt);
