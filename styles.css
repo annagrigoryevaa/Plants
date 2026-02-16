@@ -598,11 +598,12 @@ p {
 }
 
 .calendar-event-dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--muted);
+  box-shadow: 0 0 0 2px #fff;
 }
 
 .calendar-event.watered .calendar-event-dot {
