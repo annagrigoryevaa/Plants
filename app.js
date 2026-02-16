@@ -253,13 +253,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  dom.eventList.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-action='delete']");
-    if (!button) {
-      return;
-    }
-    deleteEvent(Number(button.dataset.id));
-  });
+  if (dom.eventList) {
+    dom.eventList.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action='delete']");
+      if (!button) {
+        return;
+      }
+      deleteEvent(Number(button.dataset.id));
+    });
+  }
 
   dom.calendarGrid.addEventListener("click", (event) => {
     const cell = event.target.closest("button[data-date]");
@@ -555,10 +557,15 @@ document.addEventListener("DOMContentLoaded", () => {
       monthCursor: state.monthCursor,
       selectedDate: state.selectedDate,
       events: state.events,
+      showTitles: true,
+      maxTitles: 2,
     });
   }
 
   function renderMainEventList() {
+    if (!dom.eventList) {
+      return;
+    }
     const events = filterEventsByMonth(state.events, state.monthCursor);
     renderEventList(dom.eventList, events, {
       showPlantName: true,
@@ -577,6 +584,7 @@ document.addEventListener("DOMContentLoaded", () => {
       monthCursor: state.plantDetail.monthCursor,
       selectedDate: state.plantDetail.selectedDate,
       events,
+      showTitles: false,
     });
     renderEventList(dom.plantEventList, filterEventsByMonth(events, state.plantDetail.monthCursor), {
       showPlantName: false,
@@ -1107,7 +1115,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function renderCalendar({ grid, monthLabel, monthCursor, selectedDate, events }) {
+  function getPlantName(plantId) {
+    const plant = plantIndex.get(plantId);
+    return plant ? plant.name : "Растение";
+  }
+
+  function renderCalendar({
+    grid,
+    monthLabel,
+    monthCursor,
+    selectedDate,
+    events,
+    showTitles = false,
+    maxTitles = 2,
+  }) {
     const year = monthCursor.getFullYear();
     const month = monthCursor.getMonth();
     monthLabel.textContent = new Intl.DateTimeFormat("ru-RU", {
@@ -1147,7 +1168,7 @@ document.addEventListener("DOMContentLoaded", () => {
       cell.appendChild(number);
 
       const dayEvents = eventsByDate.get(date) || [];
-      if (dayEvents.length) {
+      if (!showTitles && dayEvents.length) {
         const markerWrap = document.createElement("div");
         markerWrap.className = "calendar-markers";
         const counts = countEventTypes(dayEvents);
@@ -1162,6 +1183,31 @@ document.addEventListener("DOMContentLoaded", () => {
           markerWrap.appendChild(marker);
         });
         cell.appendChild(markerWrap);
+      }
+
+      if (showTitles && dayEvents.length) {
+        const list = document.createElement("div");
+        list.className = "calendar-events";
+        const limited = dayEvents.slice(0, maxTitles);
+        limited.forEach((event) => {
+          const name = getPlantName(event.plantId);
+          const row = document.createElement("div");
+          row.className = `calendar-event ${event.type}`;
+          const dot = document.createElement("span");
+          dot.className = "calendar-event-dot";
+          const text = document.createElement("span");
+          text.textContent = name;
+          row.appendChild(dot);
+          row.appendChild(text);
+          list.appendChild(row);
+        });
+        if (dayEvents.length > maxTitles) {
+          const more = document.createElement("div");
+          more.className = "calendar-event-more";
+          more.textContent = `+${dayEvents.length - maxTitles}`;
+          list.appendChild(more);
+        }
+        cell.appendChild(list);
       }
 
       grid.appendChild(cell);
